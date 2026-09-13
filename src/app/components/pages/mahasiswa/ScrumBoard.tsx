@@ -23,6 +23,12 @@ import {
 } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "../../../lib/api";
 import { formatDateReadable } from "../../../lib/date";
+import {
+  ProjectDivision,
+  getDivisionTabs,
+  normalizeDivisionItem,
+  normalizeTaskDivisionFields
+} from "../../../lib/scrum";
 
 interface ScrumTask {
   id: string;
@@ -35,9 +41,12 @@ interface ScrumTask {
   priority?: string;
   tag?: string;
   progress: number;
-  sprintId?: string;
+  sprintId?: string | null;
   sprintName?: string;
   sprintStatus?: string;
+  divisionId?: string | null;
+  divisionName?: string | null;
+  divisionIsActive?: boolean | null;
   storyPoints: number;
   subtasks: Array<{
     id: string;
@@ -58,10 +67,12 @@ export default function ScrumBoard() {
   const { researchId } = useParams();
 
   const [tasks, setTasks] = useState<ScrumTask[]>([]);
+  const [divisions, setDivisions] = useState<ProjectDivision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedTask, setSelectedTask] = useState<ScrumTask | null>(null);
   const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>(researchId || "all");
+  const [selectedDivisionFilter, setSelectedDivisionFilter] = useState<string>("all");
 
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -71,8 +82,21 @@ export default function ScrumBoard() {
     setLoading(true);
     setError("");
     try {
-      const data = await apiGet<ScrumTask[]>("/research/my-scrum-tasks");
-      setTasks(data || []);
+      const data = await apiGet<any[]>("/research/my-scrum-tasks");
+      const mapped: ScrumTask[] = (data || []).map((item) => {
+        const norm = normalizeTaskDivisionFields(item);
+        return {
+          ...item,
+          divisionId: norm.divisionId,
+          divisionName: norm.divisionName,
+          divisionIsActive: norm.divisionIsActive,
+          sprintId: norm.sprintId,
+          storyPoints: norm.storyPoints ?? item.storyPoints ?? item.story_points ?? item.sp ?? 0,
+          subtasks: item.subtasks || [],
+          attachments: item.attachments || [],
+        };
+      });
+      setTasks(mapped);
     } catch (err: any) {
       setError(err?.message || "Gagal memuat tugas Scrum Anda.");
     } finally {
@@ -84,10 +108,29 @@ export default function ScrumBoard() {
     loadMyTasks();
   }, []);
 
-  // Filter tasks based on project
+  // Fetch divisions when a specific project is selected
+  useEffect(() => {
+    if (selectedProjectFilter && selectedProjectFilter !== "all") {
+      apiGet<any[]>(`/research/${selectedProjectFilter}/divisions`)
+        .then((data) => setDivisions((data || []).map(normalizeDivisionItem)))
+        .catch(() => setDivisions([]));
+    } else {
+      setDivisions([]);
+    }
+    setSelectedDivisionFilter("all");
+  }, [selectedProjectFilter]);
+
+  // Filter tasks based on project and division
   const filteredTasks = tasks.filter((t) => {
     if (selectedProjectFilter !== "all" && t.projectId !== selectedProjectFilter) {
       return false;
+    }
+    if (selectedDivisionFilter !== "all") {
+      if (selectedDivisionFilter === "unassigned") {
+        if (t.divisionId) return false;
+      } else {
+        if (t.divisionId !== selectedDivisionFilter) return false;
+      }
     }
     return true;
   });
@@ -96,6 +139,21 @@ export default function ScrumBoard() {
   const projectOptions = Array.from(
     new Map(tasks.map((t) => [t.projectId, { id: t.projectId, title: t.projectTitle }])).values()
   );
+
+  // Calculate dynamic division tabs
+  const divisionTabs = React.useMemo(() => {
+    if (selectedProjectFilter === "all") {
+      return [
+        {
+          id: "all",
+          label: "Semua Divisi",
+          count: tasks.length,
+        },
+      ];
+    }
+    const projectTasks = tasks.filter((t) => t.projectId === selectedProjectFilter);
+    return getDivisionTabs(projectTasks, divisions);
+  }, [selectedProjectFilter, tasks, divisions]);
 
   // Stats calculation
   const totalTasks = filteredTasks.length;
@@ -247,7 +305,7 @@ export default function ScrumBoard() {
           </div>
 
           {/* Project Filter Switcher */}
-          {projectOptions.length > 1 && (
+          {projectOptions.length > 0 && (
             <div className="flex items-center gap-2">
               <label className="text-xs font-bold text-muted-foreground">Proyek:</label>
               <select
@@ -307,6 +365,33 @@ export default function ScrumBoard() {
               <span className="text-xs font-bold text-emerald-600">({progressPercent}%)</span>
             </div>
           </div>
+        </div>
+
+        {/* Dynamic Division Sub-tabs */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {divisionTabs.map((tab) => {
+            const isSelected = selectedDivisionFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedDivisionFilter(tab.id)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-2 ${
+                  isSelected
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "bg-white text-muted-foreground border border-border hover:text-foreground hover:bg-slate-50"
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                    isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Board Display */}
@@ -377,6 +462,19 @@ export default function ScrumBoard() {
                               {task.sprintName && (
                                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-50 text-purple-700">
                                   {task.sprintName}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Division Badge */}
+                            <div className="flex items-center gap-1.5">
+                              {task.divisionName ? (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 truncate max-w-[200px]">
+                                  {task.divisionName}
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                                  Belum Ada Divisi
                                 </span>
                               )}
                             </div>
@@ -454,10 +552,19 @@ export default function ScrumBoard() {
               {/* Header */}
               <div className="flex items-start justify-between gap-3 pb-3 border-b border-border">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="text-[10px] font-black px-2 py-0.5 rounded bg-purple-50 text-purple-700">
                       {selectedTask.projectTitle}
                     </span>
+                    {selectedTask.divisionName ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {selectedTask.divisionName}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                        Belum Ada Divisi
+                      </span>
+                    )}
                     <span className="text-[10px] font-bold text-muted-foreground">
                       {selectedTask.sprintName || "Product Backlog"}
                     </span>

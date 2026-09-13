@@ -4,12 +4,13 @@
  * Full access: add task, edit, delete, move, edit board, manage milestone
  */
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import {
   ChevronLeft, Edit2, AlertTriangle, Check, X,
   UploadCloud, Download, Send, FileText,
   Image as ImageIcon, Folder, Plus, Trash2, MessageSquare,
   Paperclip, GitBranch, ExternalLink, Link as LinkIcon, Search,
-  Kanban, Users as UsersIcon
+  Kanban, Users as UsersIcon, GitCommit, GitPullRequest, Copy, CheckCircle2, RefreshCw
 } from "lucide-react";
 import { useConfirmDialog } from "../molecules/ConfirmDialog";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getStoredUser } from "../../lib/api";
@@ -21,6 +22,30 @@ import {
   MAHASISWA_RESEARCH_ROLES,
   normalizeResearchRoleForMemberType
 } from "../../lib/researchRoles";
+import {
+  ProjectDivision,
+  normalizeTaskDivisionFields,
+  filterTasksForBoard,
+  getDivisionTabs,
+  normalizeDivisionItem
+} from "../../lib/scrum";
+import {
+  GitHubRepository,
+  TaskRepositoryLink,
+  GitHubActivity,
+  normalizeGitHubRepository,
+  normalizeTaskRepositoryLink,
+  normalizeGitHubActivity,
+  formatTaskKey,
+  generateBranchTemplate,
+  formatShortSha,
+  getActivityTypeMeta,
+  getSuggestedStatusMeta,
+  isValidGitHubUrl,
+  formatGitHubActor,
+  canApplySuggestedStatus,
+  formatGitHubError,
+} from "../../lib/githubIntegration";
 
 type Milestone = {
   id?: number;
@@ -44,6 +69,7 @@ type TeamMember = {
 
 type BoardTask = {
   id: string;
+  taskKey?: string;
   title: string;
   status: "TO DO" | "DOING" | "REVIEW" | "DONE";
   deadline?: string;
@@ -60,6 +86,9 @@ type BoardTask = {
   sortOrder?: number;
   storyPoints?: number | null;
   sprintId?: string | null;
+  divisionId?: string | null;
+  divisionName?: string | null;
+  divisionIsActive?: boolean | null;
   createdByName?: string;
   createdByInitials?: string;
   createdByRole?: string;
@@ -306,6 +335,7 @@ function getBoardStatusFromColumnKey(columnId: BoardColumnId): BoardTask["status
 }
 
 function mapBoardTask(item: any): BoardTask {
+  const normDivision = normalizeTaskDivisionFields(item);
   const status = normalizeBoardStatus(item?.status);
   const deadline = item?.deadline || undefined;
   const isOverdue = Boolean(
@@ -325,6 +355,7 @@ function mapBoardTask(item: any): BoardTask {
 
   return {
     id: String(item?.id || ""),
+    taskKey: formatTaskKey(item?.taskKey || item?.task_key) || undefined,
     title: item?.title || "Task",
     status,
     deadline,
@@ -339,8 +370,11 @@ function mapBoardTask(item: any): BoardTask {
     progress: item?.progress !== undefined && item?.progress !== null ? Number(item.progress) : undefined,
     priority: item?.priority || undefined,
     sortOrder: Number(item?.sortOrder ?? item?.sort_order ?? 0),
-    storyPoints: item?.storyPoints ?? item?.story_points ?? (item?.sp !== undefined ? Number(item.sp) : 3),
-    sprintId: item?.sprintId ?? item?.sprint_id ?? null,
+    storyPoints: normDivision.storyPoints ?? (item?.sp !== undefined ? Number(item.sp) : 3),
+    sprintId: normDivision.sprintId,
+    divisionId: normDivision.divisionId,
+    divisionName: normDivision.divisionName,
+    divisionIsActive: normDivision.divisionIsActive,
     createdByName: item?.createdByName || item?.created_by_name || undefined,
     createdByInitials: item?.createdByName ? getInitialsFromName(item.createdByName) : undefined,
     createdByRole: item?.createdByRole || undefined
@@ -479,6 +513,7 @@ export function SharedBoardView({
 }: SharedBoardViewProps) {
   const { confirm, confirmDialog } = useConfirmDialog();
   const currentUser = getStoredUser();
+  const navigate = useNavigate();
 
   const [availableProjects, setAvailableProjects] = useState<ProjectView[]>([]);
   const [activeId, setActiveId] = useState("");
@@ -489,17 +524,42 @@ export function SharedBoardView({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [activeSprint, setActiveSprint] = useState<any>(null);
+  const [reviewSprint, setReviewSprint] = useState<any>(null);
+  const [divisions, setDivisions] = useState<ProjectDivision[]>([]);
+  const [selectedDivisionId, setSelectedDivisionId] = useState<string>("all");
   const [onlyMyTasks, setOnlyMyTasks] = useState(false);
   const projectIdsKey = projectIds.join("|");
 
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId) {
+      setActiveSprint(null);
+      setReviewSprint(null);
+      return;
+    }
     apiGet<any[]>(`/research/${activeId}/sprints`)
       .then((list) => {
         const active = (list || []).find((s) => s.status === "active");
+        const review = (list || []).find((s) => s.status === "review");
         setActiveSprint(active || null);
+        setReviewSprint(review || null);
       })
-      .catch(() => setActiveSprint(null));
+      .catch(() => {
+        setActiveSprint(null);
+        setReviewSprint(null);
+      });
+  }, [activeId]);
+
+  useEffect(() => {
+    if (!activeId) {
+      setDivisions([]);
+      return;
+    }
+    setSelectedDivisionId("all");
+    apiGet<any[]>(`/research/${activeId}/divisions`)
+      .then((list) => {
+        setDivisions((list || []).map(normalizeDivisionItem));
+      })
+      .catch(() => setDivisions([]));
   }, [activeId]);
 
   useEffect(() => {
@@ -629,7 +689,21 @@ export function SharedBoardView({
 
   // Modal state
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<"detail" | "komentar">("detail");
+  const [activeTab, setActiveTab] = useState<"detail" | "komentar" | "development">("detail");
+  const [taskRepoLinks, setTaskRepoLinks] = useState<TaskRepositoryLink[]>([]);
+  const [taskActivities, setTaskActivities] = useState<GitHubActivity[]>([]);
+  const [projectRepos, setProjectRepos] = useState<GitHubRepository[]>([]);
+  const [taskDevLoading, setTaskDevLoading] = useState<boolean>(false);
+  const [taskDevError, setTaskDevError] = useState<string>("");
+  const [showLinkRepoModal, setShowLinkRepoModal] = useState<boolean>(false);
+  const [linkingRepoId, setLinkingRepoId] = useState<string>("");
+  const [linkingBranchName, setLinkingBranchName] = useState<string>("");
+  const [savingTaskLink, setSavingTaskLink] = useState<boolean>(false);
+  const [unlinkingRepoConfirm, setUnlinkingRepoConfirm] = useState<TaskRepositoryLink | null>(null);
+  const [confirmTaskSuggestion, setConfirmTaskSuggestion] = useState<{ activity: GitHubActivity; targetStatus: string } | null>(null);
+  const [applyingTaskStatus, setApplyingTaskStatus] = useState<boolean>(false);
+  const [copiedTaskKey, setCopiedTaskKey] = useState<boolean>(false);
+  const [copiedBranchTemplate, setCopiedBranchTemplate] = useState<boolean>(false);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
@@ -642,7 +716,8 @@ export function SharedBoardView({
     priority: "Tinggi",
     deadline: "",
     assigneeId: "",
-    description: ""
+    description: "",
+    divisionId: "" as string | null
   });
   const [boardForm, setBoardForm] = useState({
     title: "",
@@ -687,6 +762,16 @@ export function SharedBoardView({
   const project = availableProjects.find((row) => row.id === activeId) ?? availableProjects[0];
   const milestones = milestonesMap[activeId] ?? [];
   const tasks = tasksMap[activeId] ?? EMPTY_BOARD_COLUMNS;
+  const allCurrentTasks = [
+    ...(tasks.todo || []),
+    ...(tasks.doing || []),
+    ...(tasks.review || []),
+    ...(tasks.done || [])
+  ];
+  const scopedTasks = activeSprint?.id
+    ? allCurrentTasks.filter((t) => t.sprintId === activeSprint.id)
+    : allCurrentTasks;
+  const divisionTabs = getDivisionTabs(scopedTasks, divisions);
   const boardPermissions = permissionsMap[activeId] || getDefaultBoardPermissions(currentUser?.role);
   const canManageCards = boardPermissions.canManageCards;
   const canFillExistingCards = canManageCards || boardPermissions.canFillExistingCards;
@@ -697,6 +782,37 @@ export function SharedBoardView({
       setAttachmentLink(project.attachment_link);
     }
   }, [project?.id]);
+
+  const loadTaskDevelopmentData = React.useCallback(async (taskId: string) => {
+    if (!activeId || !taskId) return;
+    try {
+      setTaskDevLoading(true);
+      setTaskDevError("");
+      const [linksRes, actsRes, reposRes] = await Promise.all([
+        apiGet<any[]>(`/research/${activeId}/board/tasks/${taskId}/repositories`).catch(() => []),
+        apiGet<any[]>(`/research/${activeId}/board/tasks/${taskId}/github-activity`).catch(() => []),
+        projectRepos.length === 0
+          ? apiGet<{ repositories?: any[] }>(`/research/${activeId}/repositories`).catch(() => ({ repositories: [] }))
+          : Promise.resolve({ repositories: projectRepos })
+      ]);
+
+      setTaskRepoLinks((linksRes || []).map(normalizeTaskRepositoryLink));
+      setTaskActivities((actsRes || []).map(normalizeGitHubActivity));
+      if (reposRes?.repositories) {
+        setProjectRepos((reposRes.repositories || []).map(normalizeGitHubRepository));
+      }
+    } catch {
+      setTaskDevError("Aktivitas GitHub tidak dapat dimuat saat ini.");
+    } finally {
+      setTaskDevLoading(false);
+    }
+  }, [activeId, projectRepos]);
+
+  useEffect(() => {
+    if (selectedTask?.id && activeTab === "development") {
+      void loadTaskDevelopmentData(selectedTask.id);
+    }
+  }, [selectedTask?.id, activeTab, loadTaskDevelopmentData]);
 
   const toggleMilestone = async (i: number) => {
     if (!canManageCards) {
@@ -805,18 +921,76 @@ export function SharedBoardView({
     setSelectedCommentSubtaskId(subtasks[0]?.id || "__task__");
   };
 
+  const handleLinkRepository = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTask?.id || !linkingRepoId) return;
+    try {
+      setSavingTaskLink(true);
+      setTaskDevError("");
+      await apiPost(`/research/${activeId}/board/tasks/${selectedTask.id}/repositories`, {
+        repositoryId: linkingRepoId,
+        branchName: linkingBranchName.trim() || null
+      });
+      setShowLinkRepoModal(false);
+      setLinkingRepoId("");
+      setLinkingBranchName("");
+      await loadTaskDevelopmentData(selectedTask.id);
+    } catch (err: any) {
+      setTaskDevError(formatGitHubError(err));
+    } finally {
+      setSavingTaskLink(false);
+    }
+  };
+
+  const handleUnlinkRepository = async () => {
+    if (!selectedTask?.id || !unlinkingRepoConfirm) return;
+    try {
+      setTaskDevLoading(true);
+      setTaskDevError("");
+      await apiDelete(`/research/${activeId}/board/tasks/${selectedTask.id}/repositories/${unlinkingRepoConfirm.repositoryId}`);
+      setUnlinkingRepoConfirm(null);
+      await loadTaskDevelopmentData(selectedTask.id);
+    } catch (err: any) {
+      setTaskDevError(formatGitHubError(err));
+    } finally {
+      setTaskDevLoading(false);
+    }
+  };
+
+  const handleApplyTaskSuggestion = async () => {
+    if (!selectedTask?.id || !confirmTaskSuggestion) return;
+    try {
+      setApplyingTaskStatus(true);
+      setTaskDevError("");
+      const targetStatus = confirmTaskSuggestion.targetStatus;
+      const targetColumn = (targetStatus === "TO DO" ? "todo" : targetStatus.toLowerCase()) as BoardColumnId;
+      await moveTaskToColumn(selectedTask as BoardTask, targetColumn, { refreshSelected: true });
+      setConfirmTaskSuggestion(null);
+      await loadTaskDevelopmentData(selectedTask.id);
+    } catch (err: any) {
+      setTaskDevError(err?.message || "Gagal menerapkan status task.");
+    } finally {
+      setApplyingTaskStatus(false);
+    }
+  };
+
   const openAddTaskModal = () => {
     if (!canManageCards) {
       setTaskFetchMessage("Anda tidak memiliki izin menambah kartu pada board ini.");
       return;
     }
+    const defaultDivision =
+      selectedDivisionId && selectedDivisionId !== "all" && selectedDivisionId !== "unassigned"
+        ? selectedDivisionId
+        : "";
     setTaskForm({
       title: "",
       status: "TO DO",
       priority: "Tinggi",
       deadline: "",
       assigneeId: teamMembers[0]?.id || "",
-      description: ""
+      description: "",
+      divisionId: defaultDivision
     });
     setSubtasks([""]);
     setIsAddTaskOpen(true);
@@ -834,7 +1008,8 @@ export function SharedBoardView({
       priority: selectedTask.priority || "Tinggi",
       deadline: toDateInputValue(selectedTask.deadline),
       assigneeId: selectedTask.assigneeUserIds?.[0] || "",
-      description: selectedTask.description || selectedTask.statusText || ""
+      description: selectedTask.description || selectedTask.statusText || "",
+      divisionId: selectedTask.divisionId ?? ""
     });
     setSubtasks(taskSubtasks.length > 0 ? taskSubtasks.map((item) => item.title) : [""]);
     setIsEditModalOpen(true);
@@ -905,15 +1080,31 @@ export function SharedBoardView({
       return;
     }
 
-    const payload = {
+    const activeDivisions = divisions.filter((d) => d.isActive !== false);
+    if (!isEditModalOpen && activeDivisions.length > 0 && !taskForm.divisionId) {
+      setTaskFetchMessage("Divisi wajib dipilih untuk proyek ini.");
+      return;
+    }
+
+    const payload: any = {
       title,
       description: taskForm.description.trim() || null,
       status: taskForm.status,
       deadline: taskForm.deadline || null,
       priority: taskForm.priority,
       tag: selectedTask?.tag || "Riset",
-      assignee_ids: taskForm.assigneeId ? [taskForm.assigneeId] : []
+      assignee_ids: taskForm.assigneeId ? [taskForm.assigneeId] : [],
+      divisionId: taskForm.divisionId || null,
+      division_id: taskForm.divisionId || null
     };
+
+    if (!isEditModalOpen && activeSprint?.id) {
+      payload.sprintId = activeSprint.id;
+      payload.sprint_id = activeSprint.id;
+    } else if (isEditModalOpen && selectedTask?.sprintId !== undefined) {
+      payload.sprintId = selectedTask.sprintId;
+      payload.sprint_id = selectedTask.sprintId;
+    }
 
     try {
       setTaskFetchMessage("");
@@ -1897,6 +2088,53 @@ export function SharedBoardView({
                 </button>
               </div>
             </div>
+          ) : reviewSprint ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-[16px] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <Kanban size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black text-foreground">Sprint {reviewSprint.name}</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 uppercase tracking-wider">
+                      Tahap Review
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900/80 mt-1">
+                    Sprint {reviewSprint.name} sedang dalam tahap Review. Summary dan evaluasi Sprint perlu diselesaikan sebelum Sprint berikutnya dapat dimulai.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {(currentUser?.role === "operator" || currentUser?.role === "dosen") && (
+                  <button
+                    onClick={() => {
+                      const path = currentUser?.role === "dosen"
+                        ? `/dosen/scrum?projectId=${activeId}&sprintId=${reviewSprint.id}`
+                        : `/operator/scrum?projectId=${activeId}&sprintId=${reviewSprint.id}`;
+                      navigate(path);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-amber-600 hover:bg-amber-700 text-white shadow-sm flex items-center gap-1.5 transition-colors"
+                    title="Buka Sprint Summary & Review"
+                  >
+                    <FileText size={13} />
+                    <span>Buka Sprint Summary</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setOnlyMyTasks(!onlyMyTasks)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                    onlyMyTasks
+                      ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                      : "bg-white hover:bg-slate-50 text-muted-foreground border-border"
+                  }`}
+                >
+                  {onlyMyTasks ? "✓ Menampilkan Tugas Saya" : "Filter: Tugas Saya Saja"}
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="bg-white border border-border rounded-[16px] p-3.5 shadow-sm flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1916,15 +2154,42 @@ export function SharedBoardView({
             </div>
           )}
 
-              {/* 🚀🚀 Kanban Board 🚀🚀 */}
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 xl:gap-6 flex-1 min-h-[400px]">
-                {columns.map((col) => {
-                  const colTasks = (tasks[col.id] || []).filter((task) => {
-                    if (onlyMyTasks && currentUser?.id) {
-                      return task.assigneeUserIds?.includes(currentUser.id);
-                    }
-                    return true;
-                  });
+          {/* ── Division Sub-tabs ── */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1 scrollbar-thin">
+            {divisionTabs.map((tab) => {
+              const isSelected = selectedDivisionId === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setSelectedDivisionId(tab.id)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 border ${
+                    isSelected
+                      ? "bg-[#6C47FF] text-white border-[#6C47FF] shadow-sm"
+                      : "bg-white hover:bg-slate-50 text-slate-600 border-border"
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                      isSelected ? "bg-white/25 text-white" : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 🚀🚀 Kanban Board 🚀🚀 */}
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 xl:gap-6 flex-1 min-h-[400px]">
+            {columns.map((col) => {
+              const colTasks = filterTasksForBoard(tasks[col.id] || [], {
+                activeSprintId: activeSprint?.id || null,
+                selectedDivisionId,
+                onlyMyTasks,
+                currentUserId: currentUser?.id,
+              });
 
                   return (
                   <div
@@ -1953,6 +2218,13 @@ export function SharedBoardView({
                           title={canFillExistingCards ? "Seret kartu ini ke kolom lain untuk mengubah status." : undefined}
                           className={`bg-white rounded-[16px] p-5 shadow-sm border ${task.isOverdue && col.id !== "done" ? "border-red-400" : "border-border/60"} hover:shadow-md transition-all ${canFillExistingCards ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${movingTaskId === task.id ? "opacity-60" : ""} ${draggedTask?.taskId === task.id ? "scale-[0.98] opacity-70" : ""}`}
                         >
+                          {task.taskKey && (
+                            <div className="mb-1.5">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200 inline-block">
+                                {task.taskKey}
+                              </span>
+                            </div>
+                          )}
                           <p className="font-bold text-sm text-foreground mb-2.5 leading-snug">{task.title}</p>
                           {task.deadline && (
                             <div className="flex items-center gap-1.5 mb-3">
@@ -1979,8 +2251,19 @@ export function SharedBoardView({
                             </div>
                           )}
                           <div className="flex items-center justify-between mt-4">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${getTagColor(task.tag)}`}>{task.tag}</span>
+                              {selectedDivisionId === "all" && (
+                                task.divisionName ? (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                    {task.divisionName}
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-500 border border-dashed border-slate-300">
+                                    Belum Ada Divisi
+                                  </span>
+                                )
+                              )}
                               {task.storyPoints !== null && task.storyPoints !== undefined && (
                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-0.5" title="Tingkat Kesulitan (Fibonacci Story Points)">
                                   <span>⚡</span>
@@ -2128,6 +2411,23 @@ export function SharedBoardView({
             <div className="p-6 border-b border-border bg-white shrink-0">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
+                  {selectedTask.taskKey && (
+                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-800 font-mono font-bold text-xs">
+                      <span>{selectedTask.taskKey}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(selectedTask.taskKey);
+                          setCopiedTaskKey(true);
+                          setTimeout(() => setCopiedTaskKey(false), 2000);
+                        }}
+                        title="Copy Task Key"
+                        className="text-slate-400 hover:text-slate-700 transition-colors p-0.5"
+                      >
+                        {copiedTaskKey ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                      </button>
+                    </div>
+                  )}
                   <span className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide ${selectedTask.status === "DONE" ? "bg-emerald-100 text-emerald-700" :
                     selectedTask.status === "DOING" ? "bg-blue-100 text-blue-700" :
                       selectedTask.status === "REVIEW" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-700"
@@ -2177,13 +2477,13 @@ export function SharedBoardView({
               )}
             </div>
             <div className="flex px-6 border-b border-border bg-white shrink-0">
-              {(["detail", "komentar"] as const).map((tab) => (
+              {(["detail", "komentar", "development"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`py-3 px-2 mr-6 text-sm font-bold border-b-2 transition-colors capitalize ${activeTab === tab ? `border-[#0AB600] ${accentText}` : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 >
-                  {tab === "detail" ? "Detail" : `Komentar (${selectedTask.comments || 0})`}
+                  {tab === "detail" ? "Detail" : tab === "komentar" ? `Komentar (${selectedTask.comments || 0})` : "Development"}
                 </button>
               ))}
             </div>
@@ -2222,6 +2522,12 @@ export function SharedBoardView({
                     <div>
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Deadline</span>
                       <span className={`text-sm font-bold ${selectedTask.isOverdue ? "text-red-500" : "text-foreground"}`}>{formatDateReadable(selectedTask.deadline) || "Belum diatur"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Divisi</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200">
+                        {selectedTask.divisionName || "Belum Ada Divisi"}
+                      </span>
                     </div>
                     <div>
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-2">Ditugaskan Ke</span>
@@ -2494,6 +2800,447 @@ export function SharedBoardView({
                   )}
                 </div>
               )}
+
+              {/* ══ Development Tab ══ */}
+              {activeTab === "development" && (
+                <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+                  {/* Scoped error banner */}
+                  {taskDevError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle size={15} className="shrink-0 text-red-600" />
+                        <span>{taskDevError}</span>
+                      </div>
+                      <button onClick={() => setTaskDevError("")} className="text-red-500 hover:text-red-700">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Section 1: Task Key & Recommended Branch Convention */}
+                  <div className="bg-white rounded-2xl p-4 border border-border shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                        Task Key
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded text-xs font-mono font-black bg-slate-100 text-slate-800 border border-slate-200">
+                        {selectedTask.taskKey || "(Belum ada task key)"}
+                      </span>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                          Rekomendasi Branch Convention
+                        </span>
+                        {selectedTask.taskKey && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const template = generateBranchTemplate(selectedTask.taskKey, selectedTask.title);
+                              navigator.clipboard.writeText(template);
+                              setCopiedBranchTemplate(true);
+                              setTimeout(() => setCopiedBranchTemplate(false), 2000);
+                            }}
+                            className="text-xs text-primary hover:underline font-bold flex items-center gap-1"
+                          >
+                            {copiedBranchTemplate ? (
+                              <>
+                                <Check size={12} className="text-emerald-600" />
+                                <span className="text-emerald-600">Tersalin</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy size={12} />
+                                <span>Copy Branch Template</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-800 break-all select-all">
+                        {selectedTask.taskKey
+                          ? generateBranchTemplate(selectedTask.taskKey, selectedTask.title)
+                          : "(Task key diperlukan untuk template branch)"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Linked Repositories */}
+                  <div className="bg-white rounded-2xl p-4 border border-border shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <GitBranch size={16} className="text-slate-700" />
+                        <h4 className="text-xs font-black text-foreground uppercase tracking-wider">
+                          Repository Terhubung ({taskRepoLinks.length})
+                        </h4>
+                      </div>
+                      {canManageCards && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLinkingRepoId(projectRepos[0]?.id || "");
+                            setLinkingBranchName("");
+                            setShowLinkRepoModal(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors flex items-center gap-1"
+                        >
+                          <Plus size={12} />
+                          <span>Hubungkan</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {taskRepoLinks.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-2">
+                        Belum ada repository yang terhubung ke task ini.
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-border/60">
+                        {taskRepoLinks.map((link) => {
+                          const safeUrl = `https://github.com/${link.owner}/${link.repo}`;
+                          return (
+                            <div key={link.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 font-bold text-foreground">
+                                  <span>{link.fullName}</span>
+                                  {isValidGitHubUrl(safeUrl) && (
+                                    <a
+                                      href={safeUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-slate-400 hover:text-slate-700"
+                                      title="Buka repository"
+                                    >
+                                      <ExternalLink size={12} />
+                                    </a>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-muted-foreground text-[11px] mt-0.5">
+                                  {link.branchName && (
+                                    <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
+                                      {link.branchName}
+                                    </span>
+                                  )}
+                                  <span>•</span>
+                                  <span>Sumber: {link.linkSource}</span>
+                                </div>
+                              </div>
+                              {canManageCards && (
+                                <button
+                                  type="button"
+                                  onClick={() => setUnlinkingRepoConfirm(link)}
+                                  className="text-red-500 hover:text-red-700 text-xs font-bold px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                                >
+                                  Lepas Link
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section 3: Development Activity Timeline */}
+                  <div className="bg-white rounded-2xl p-4 border border-border shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <GitCommit size={16} className="text-slate-700" />
+                        <h4 className="text-xs font-black text-foreground uppercase tracking-wider">
+                          Riwayat Aktivitas GitHub ({taskActivities.length})
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => loadTaskDevelopmentData(selectedTask.id)}
+                        disabled={taskDevLoading}
+                        className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors"
+                        title="Refresh Aktivitas"
+                      >
+                        <RefreshCw size={13} className={taskDevLoading ? "animate-spin" : ""} />
+                      </button>
+                    </div>
+
+                    {taskDevLoading ? (
+                      <p className="text-xs text-muted-foreground py-4 text-center">
+                        Memuat aktivitas GitHub...
+                      </p>
+                    ) : taskActivities.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-muted-foreground space-y-1">
+                        <p className="font-bold text-slate-700">Belum ada aktivitas GitHub untuk task ini</p>
+                        <p className="text-[11px] max-w-sm mx-auto">
+                          Aktivitas commit atau pull request yang menyebutkan{" "}
+                          <strong className="text-foreground">{selectedTask.taskKey || "TASK-KEY"}</strong>{" "}
+                          akan otomatis tercatat di sini.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {taskActivities.map((act) => {
+                          const typeMeta = getActivityTypeMeta(act.activityType, act.prMerged);
+                          const statusMeta = getSuggestedStatusMeta(act.suggestedTaskStatus);
+                          const isPush = act.activityType === "push";
+                          const hasValidUrl = isValidGitHubUrl(act.htmlUrl);
+
+                          const applyEligible = canApplySuggestedStatus({
+                            suggestedStatus: act.suggestedTaskStatus,
+                            currentTaskStatus: selectedTask.status,
+                            isSprintClosed: activeSprint?.id === selectedTask?.sprintId && activeSprint?.status === "closed",
+                            canManageTask: canFillExistingCards,
+                          });
+
+                          return (
+                            <div
+                              key={act.id}
+                              className="p-3 rounded-xl bg-slate-50/70 border border-slate-200/80 space-y-2 text-xs"
+                            >
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${typeMeta.badgeClass}`}>
+                                    {typeMeta.label}
+                                  </span>
+                                  {act.branchName && (
+                                    <span className="font-mono text-[11px] text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                                      {act.branchName}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {act.occurredAt ? new Date(act.occurredAt).toLocaleString("id-ID") : "-"}
+                                </span>
+                              </div>
+
+                              {isPush ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {act.commitSha && (
+                                      <code className="px-1 py-0.5 rounded bg-white text-slate-800 font-mono font-bold text-[11px] border border-slate-200">
+                                        {formatShortSha(act.commitSha)}
+                                      </code>
+                                    )}
+                                    <span className="font-semibold text-foreground">
+                                      {act.commitMessage || "(Tanpa pesan commit)"}
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {act.prNumber && (
+                                      <span className="font-black text-purple-700">
+                                        PR #{act.prNumber}
+                                      </span>
+                                    )}
+                                    <span className="font-semibold text-foreground">
+                                      {act.prTitle || "(Tanpa judul PR)"}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-[11px] text-muted-foreground">
+                                <div>
+                                  Oleh: <strong className="text-foreground">{formatGitHubActor(act.actorLogin)}</strong>
+                                </div>
+                                {hasValidUrl && (
+                                  <a
+                                    href={act.htmlUrl!}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-primary hover:underline font-semibold"
+                                  >
+                                    <span>GitHub</span>
+                                    <ExternalLink size={10} />
+                                  </a>
+                                )}
+                              </div>
+
+                              {/* Status Suggestion Presentation */}
+                              {statusMeta && (
+                                <div className="mt-2 pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2 flex-wrap bg-white p-2.5 rounded-lg border">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${statusMeta.badgeClass}`}>
+                                      {statusMeta.label}
+                                    </span>
+                                    {!applyEligible.eligible && applyEligible.reason && (
+                                      <span className="text-[11px] text-muted-foreground font-medium">
+                                        • {applyEligible.reason}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {applyEligible.eligible && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setConfirmTaskSuggestion({
+                                          activity: act,
+                                          targetStatus: act.suggestedTaskStatus!,
+                                        })
+                                      }
+                                      className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-bold hover:bg-slate-800 transition-colors shadow-sm"
+                                    >
+                                      Terapkan Status {act.suggestedTaskStatus}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Link Repository Modal */}
+              {showLinkRepoModal && (
+                <div className="fixed inset-0 z-[120] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4 animate-in fade-in">
+                    <div className="flex items-center justify-between border-b border-border pb-3">
+                      <h4 className="text-sm font-black text-foreground flex items-center gap-2">
+                        <GitBranch size={16} />
+                        <span>Hubungkan Repository</span>
+                      </h4>
+                      <button onClick={() => setShowLinkRepoModal(false)} className="text-slate-400 hover:text-slate-600">
+                        <X size={16} />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleLinkRepository} className="space-y-3">
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1">
+                          Pilih Repository <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          required
+                          value={linkingRepoId}
+                          onChange={(e) => setLinkingRepoId(e.target.value)}
+                          className="w-full text-xs font-bold border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none"
+                        >
+                          {projectRepos.length === 0 ? (
+                            <option value="">Tidak ada repository pada project ini</option>
+                          ) : (
+                            projectRepos
+                              .sort((a, b) => {
+                                const aMatches = a.divisionId === selectedTask.divisionId;
+                                const bMatches = b.divisionId === selectedTask.divisionId;
+                                if (aMatches && !bMatches) return -1;
+                                if (!aMatches && bMatches) return 1;
+                                return a.fullName.localeCompare(b.fullName);
+                              })
+                              .map((r) => (
+                                <option key={r.id} value={r.id}>
+                                  {r.fullName} {r.divisionId === selectedTask.divisionId ? "(Divisi Sesuai)" : ""}
+                                </option>
+                              ))
+                          )}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1">
+                          Nama Branch (Opsional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: feature/TASK-184-auth"
+                          value={linkingBranchName}
+                          onChange={(e) => setLinkingBranchName(e.target.value)}
+                          className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                        <button
+                          type="button"
+                          onClick={() => setShowLinkRepoModal(false)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingTaskLink || !linkingRepoId}
+                          className="px-3.5 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          {savingTaskLink ? "Menghubungkan..." : "Hubungkan"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Unlink Repository Confirmation Modal */}
+              {unlinkingRepoConfirm && (
+                <div className="fixed inset-0 z-[120] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl max-w-xs w-full p-5 shadow-2xl text-center space-y-3 animate-in fade-in">
+                    <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+                      <AlertTriangle size={24} />
+                    </div>
+                    <h4 className="text-sm font-black text-foreground">Lepaskan Link Repository?</h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Link repository akan dilepas dari task. Riwayat aktivitas GitHub yang sudah tersimpan tidak akan dihapus.
+                    </p>
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setUnlinkingRepoConfirm(null)}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleUnlinkRepository}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm"
+                      >
+                        Lepas Link
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Human Confirmation Modal for Task Status Suggestion */}
+              {confirmTaskSuggestion && (
+                <div className="fixed inset-0 z-[120] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl text-center space-y-3 animate-in fade-in">
+                    <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto">
+                      <CheckCircle2 size={24} />
+                    </div>
+                    <h4 className="text-sm font-black text-foreground">
+                      Terapkan Status {confirmTaskSuggestion.targetStatus}?
+                    </h4>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      GitHub menyarankan status{" "}
+                      <strong className="text-foreground">{confirmTaskSuggestion.targetStatus}</strong>{" "}
+                      berdasarkan aktivitas pengembangan. Status task akan diperbarui menggunakan alur Task normal.
+                    </p>
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmTaskSuggestion(null)}
+                        disabled={applyingTaskStatus}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleApplyTaskSuggestion}
+                        disabled={applyingTaskStatus}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold text-white bg-primary hover:bg-primary/90 transition-colors shadow-sm"
+                      >
+                        {applyingTaskStatus ? "Menerapkan..." : `Terapkan ${confirmTaskSuggestion.targetStatus}`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2550,13 +3297,25 @@ export function SharedBoardView({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm font-bold text-slate-700 block mb-1.5">Deadline</label>
-                  <input
-                    type="date"
-                    value={taskForm.deadline}
-                    onChange={(e) => setTaskForm((prev) => ({ ...prev, deadline: e.target.value }))}
-                    className="w-full p-3 bg-white border border-slate-300 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-[#6C47FF]/20 focus:border-[#6C47FF] outline-none transition-all cursor-pointer"
-                  />
+                  <label className="text-sm font-bold text-slate-700 block mb-1.5">
+                    Divisi {divisions.filter((d) => d.isActive !== false).length > 0 && <span className="text-red-500">*</span>}
+                  </label>
+                  <select
+                    value={taskForm.divisionId || ""}
+                    onChange={(e) => setTaskForm((prev) => ({ ...prev, divisionId: e.target.value || null }))}
+                    className="w-full p-3 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-[#6C47FF]/20 focus:border-[#6C47FF] outline-none transition-all"
+                  >
+                    {divisions.filter((d) => d.isActive !== false).length > 0 ? (
+                      <option value="">-- Pilih Divisi --</option>
+                    ) : (
+                      <option value="">Tanpa Divisi</option>
+                    )}
+                    {divisions.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} {d.isActive === false ? "(Nonaktif)" : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-sm font-bold text-slate-700 block mb-1.5">Ditugaskan ke</label>
@@ -2569,6 +3328,15 @@ export function SharedBoardView({
                     {teamMembers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </div>
+              </div>
+              <div>
+                <label className="text-sm font-bold text-slate-700 block mb-1.5">Deadline</label>
+                <input
+                  type="date"
+                  value={taskForm.deadline}
+                  onChange={(e) => setTaskForm((prev) => ({ ...prev, deadline: e.target.value }))}
+                  className="w-full p-3 bg-white border border-slate-300 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-[#6C47FF]/20 focus:border-[#6C47FF] outline-none transition-all cursor-pointer"
+                />
               </div>
               <div>
                 <label className="text-sm font-bold text-slate-700 block mb-1.5">Deskripsi Tugas</label>
