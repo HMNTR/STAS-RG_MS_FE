@@ -422,3 +422,45 @@ export function formatGitHubError(error: any): string {
       return "Terjadi kesalahan saat memproses data GitHub.";
   }
 }
+
+export interface ResearchProjectItem {
+  id: string;
+  title: string;
+  short_title?: string;
+  status: string;
+}
+
+/**
+ * Resolves the correct API endpoint for research project listing.
+ * Operator uses GET /research (NOT /research/projects).
+ * Dosen uses GET /research/assigned (optionally with userId).
+ */
+export function getResearchProjectsEndpoint(isDosen: boolean, userId?: string | null): string {
+  if (isDosen) {
+    return userId ? `/research/assigned?userId=${encodeURIComponent(userId)}` : "/research/assigned";
+  }
+  return "/research";
+}
+
+/**
+ * Normalizes research project list response from GET /research or GET /research/assigned.
+ * Safely handles plain array, wrapped { data: [...] }, or wrapped { projects: [...] }.
+ */
+export function normalizeResearchProjectList(data: any): ResearchProjectItem[] {
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.projects)
+        ? data.projects
+        : [];
+
+  return rawList
+    .map((item: any) => ({
+      id: String(item?.id ?? ""),
+      title: String(item?.title ?? item?.name ?? ""),
+      short_title: item?.short_title ?? item?.shortTitle ?? undefined,
+      status: String(item?.status ?? "Aktif"),
+    }))
+    .filter((p: ResearchProjectItem) => Boolean(p.id));
+}
