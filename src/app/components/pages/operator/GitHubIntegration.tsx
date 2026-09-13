@@ -45,15 +45,13 @@ import {
   calculateGitHubActivitySummary,
   canApplySuggestedStatus,
   formatGitHubError,
+  getResearchProjectsEndpoint,
+  normalizeResearchProjectList,
+  ResearchProjectItem,
 } from "../../../lib/githubIntegration";
 import { normalizeDivisionItem } from "../../../lib/scrum";
 
-interface Project {
-  id: string;
-  title: string;
-  short_title?: string;
-  status: string;
-}
+type Project = ResearchProjectItem;
 
 interface ProjectDivision {
   id: string;
@@ -154,9 +152,9 @@ export default function GitHubIntegration() {
       try {
         setInitialLoading(true);
         setError("");
-        const endpoint = isDosen ? "/research/assigned" : "/research/projects";
-        const data = await apiGet<Project[]>(endpoint);
-        const list = Array.isArray(data) ? data : [];
+        const endpoint = getResearchProjectsEndpoint(isDosen, currentUser?.id);
+        const data = await apiGet<any>(endpoint);
+        const list = normalizeResearchProjectList(data);
         if (mounted) {
           setProjects(list);
           const currentParam = searchParams.get("projectId");
@@ -176,7 +174,7 @@ export default function GitHubIntegration() {
     return () => {
       mounted = false;
     };
-  }, [isDosen]);
+  }, [isDosen, currentUser?.id]);
 
   // When selected project changes: load divisions, sprints, repositories, and config
   const loadProjectData = useCallback(async (projectId: string) => {

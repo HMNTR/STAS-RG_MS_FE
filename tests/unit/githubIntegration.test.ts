@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import {
   normalizeGitHubRepository,
   normalizeTaskRepositoryLink,
@@ -15,6 +17,8 @@ import {
   calculateGitHubActivitySummary,
   canApplySuggestedStatus,
   formatGitHubError,
+  getResearchProjectsEndpoint,
+  normalizeResearchProjectList,
 } from "../../src/app/lib/githubIntegration.ts";
 
 test("1. repository normalization handles camelCase and snake_case", () => {
@@ -258,4 +262,76 @@ test("16. formatGitHubError translates business error codes", () => {
     formatGitHubError({ message: "Custom message" }),
     "Custom message"
   );
+});
+
+test("17. getResearchProjectsEndpoint resolves /research for operator and never /research/projects", () => {
+  const operatorEndpoint = getResearchProjectsEndpoint(false);
+  assert.equal(operatorEndpoint, "/research");
+  assert.notEqual(operatorEndpoint, "/research/projects");
+  assert.ok(!operatorEndpoint.includes("/research/projects"), "Must not contain /research/projects");
+
+  const dosenWithUser = getResearchProjectsEndpoint(true, "DOSEN-001");
+  assert.equal(dosenWithUser, "/research/assigned?userId=DOSEN-001");
+
+  const dosenWithoutUser = getResearchProjectsEndpoint(true, null);
+  assert.equal(dosenWithoutUser, "/research/assigned");
+});
+
+test("18. normalizeResearchProjectList safely handles array, data wrapper, and invalid items", () => {
+  // Flat array (standard GET /research response)
+  const rawArray = [
+    { id: "PROJ-1", title: "Project Alpha", short_title: "Alpha", status: "Aktif" },
+    { id: "PROJ-2", title: "Project Beta", shortTitle: "Beta", status: "Aktif" },
+  ];
+  const list1 = normalizeResearchProjectList(rawArray);
+  assert.equal(list1.length, 2);
+  assert.equal(list1[0].id, "PROJ-1");
+  assert.equal(list1[0].short_title, "Alpha");
+  assert.equal(list1[1].id, "PROJ-2");
+  assert.equal(list1[1].short_title, "Beta");
+
+  // Wrapped in { data: [...] }
+  const wrappedData = { data: [{ id: "PROJ-3", title: "Project Gamma" }] };
+  const list2 = normalizeResearchProjectList(wrappedData);
+  assert.equal(list2.length, 1);
+  assert.equal(list2[0].id, "PROJ-3");
+  assert.equal(list2[0].title, "Project Gamma");
+  assert.equal(list2[0].status, "Aktif");
+
+  // Wrapped in { projects: [...] }
+  const wrappedProjects = { projects: [{ id: "PROJ-4", name: "Project Delta" }] };
+  const list3 = normalizeResearchProjectList(wrappedProjects);
+  assert.equal(list3.length, 1);
+  assert.equal(list3[0].id, "PROJ-4");
+  assert.equal(list3[0].title, "Project Delta");
+
+  // Handles null / empty / malformed without throwing
+  assert.deepEqual(normalizeResearchProjectList(null), []);
+  assert.deepEqual(normalizeResearchProjectList(undefined), []);
+  assert.deepEqual(normalizeResearchProjectList({}), []);
+  assert.deepEqual(normalizeResearchProjectList([{ title: "No ID" }]), []);
+});
+
+test("19. GitHubIntegration.tsx does NOT reference /research/projects and uses valid /research endpoint", () => {
+  const rootDir = process.cwd();
+  const pagePath = path.join(rootDir, "src/app/components/pages/operator/GitHubIntegration.tsx");
+  const content = fs.readFileSync(pagePath, "utf-8");
+
+  assert.ok(
+    !content.includes("/research/projects"),
+    "GitHubIntegration.tsx must not contain the obsolete /research/projects endpoint"
+  );
+  assert.ok(
+    content.includes("getResearchProjectsEndpoint") || content.includes('"/research"'),
+    "GitHubIntegration.tsx must use valid research project loading logic"
+  );
+});
+
+test("20. GitHub App unconfigured state remains supported and does not crash", () => {
+  const unconfigured = normalizeGitHubConfigStatus({ configured: false, repositories: [] });
+  assert.equal(unconfigured.configured, false);
+  assert.ok(unconfigured.message?.includes("belum dikonfigurasi"));
+
+  const unconfiguredEmpty = normalizeGitHubConfigStatus(null);
+  assert.equal(unconfiguredEmpty.configured, false);
 });
