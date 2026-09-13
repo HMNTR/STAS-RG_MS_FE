@@ -16,6 +16,7 @@ import {
   CheckCheck,
   LogOut,
   Menu,
+  GitBranch,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AppNotification, useNotifications } from "../../hooks/useNotifications";
@@ -23,7 +24,8 @@ import { AppNotification, useNotifications } from "../../hooks/useNotifications"
 const navItems = [
   { name: "Dashboard", path: "/dosen/dashboard", icon: LayoutDashboard },
   { name: "Riset Saya", path: "/dosen/riset", icon: FlaskConical },
-  { name: "Scrum & Sprint", path: "/dosen/scrum", icon: Layers },
+  { name: "Sprint Summary", path: "/dosen/scrum", icon: Layers },
+  { name: "GitHub Development", path: "/dosen/github", icon: GitBranch },
   { name: "Review Logbook", path: "/dosen/logbook", icon: BookOpen },
   { name: "Review Laporan", path: "/dosen/draft", icon: FileText },
   { name: "Progress Tim", path: "/dosen/progress", icon: Kanban },

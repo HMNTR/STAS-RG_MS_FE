@@ -41,6 +41,8 @@ import BerkasKelulusanOperator from "./components/pages/operator/BerkasKelulusan
 import ReaktivasiAlumni from "./components/pages/operator/ReaktivasiAlumni";
 import KeanggotaanRiset from "./components/pages/operator/KeanggotaanRiset";
 import ScrumPlanning from "./components/pages/operator/ScrumPlanning";
+import SprintSummary from "./components/pages/operator/SprintSummary";
+import GitHubIntegration from "./components/pages/operator/GitHubIntegration";
 import DashboardDosen from "./components/pages/dosen/DashboardDosen";
 import RisetDosen from "./components/pages/dosen/RisetDosen";
 import ReviewLogbook from "./components/pages/dosen/ReviewLogbook";
@@ -190,7 +192,10 @@ export const router = createBrowserRouter([
               { path: "mahasiswa", element: <DatabaseMahasiswa /> },
               { path: "riset", element: <DatabaseRiset /> },
               { path: "keanggotaan", element: <KeanggotaanRiset /> },
-              { path: "scrum", element: <ScrumPlanning /> },
+              { path: "scrum", element: <SprintSummary /> },
+              { path: "scrum/planning", element: <ScrumPlanning /> },
+              { path: "github", element: <GitHubIntegration /> },
+              { path: "scrum/github", element: <GitHubIntegration /> },
               { path: "dosen", element: <DatabaseDosen /> },
               { path: "operator", element: <DatabaseOperator /> },
               { path: "wfh-mahasiswa", element: <PengaturanWfhMahasiswa /> },
@@ -223,7 +228,10 @@ export const router = createBrowserRouter([
               { index: true, element: <Navigate to="/dosen/dashboard" replace /> },
               { path: "dashboard", element: <DashboardDosen /> },
               { path: "riset", element: <RisetDosen /> },
-              { path: "scrum", element: <ScrumPlanning /> },
+              { path: "scrum", element: <SprintSummary /> },
+              { path: "scrum/planning", element: <ScrumPlanning /> },
+              { path: "github", element: <GitHubIntegration /> },
+              { path: "scrum/github", element: <GitHubIntegration /> },
               { path: "logbook", element: <ReviewLogbook /> },
               { path: "draft", element: <ReviewDraft /> },
               { path: "progress", element: <ProgressTim /> },

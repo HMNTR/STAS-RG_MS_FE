@@ -20,9 +20,16 @@ import {
   ChevronUp,
   Clock,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  FileText,
+  X
 } from "lucide-react";
 import { apiGet, apiPost, apiPatch, apiDelete, getStoredUser } from "../../../lib/api";
+import {
+  ProjectDivision,
+  normalizeDivisionItem,
+  END_SPRINT_CONFIRMATION_MESSAGE
+} from "../../../lib/scrum";
 
 const FIBONACCI_POINTS = [1, 2, 3, 5, 8, 13, 21];
 
@@ -33,7 +40,7 @@ interface Sprint {
   goal: string;
   startDate: string | null;
   endDate: string | null;
-  status: "planning" | "active" | "completed";
+  status: "planning" | "active" | "review" | "closed" | "completed";
   totalTasks: number;
   completedTasks: number;
   totalPoints: number;
@@ -88,9 +95,18 @@ export default function ScrumPlanning() {
     description: "",
     storyPoints: 3,
     assigneeIds: [] as string[],
-    sprintId: "" as string | null
+    sprintId: "" as string | null,
+    divisionId: "" as string | null
   });
   const [isEditingTask, setIsEditingTask] = useState(false);
+
+  // Division states
+  const [divisions, setDivisions] = useState<ProjectDivision[]>([]);
+  const [isDivisionModalOpen, setIsDivisionModalOpen] = useState(false);
+  const [newDivisionName, setNewDivisionName] = useState("");
+  const [editingDivisionId, setEditingDivisionId] = useState<string | null>(null);
+  const [editingDivisionName, setEditingDivisionName] = useState("");
+  const [divisionActionLoading, setDivisionActionLoading] = useState(false);
 
   // Load Projects
   useEffect(() => {
@@ -116,19 +132,21 @@ export default function ScrumPlanning() {
     loadProjects();
   }, [isDosen, currentUser?.id]);
 
-  // Load Sprints, Tasks, and Members when activeProject changes
+  // Load Sprints, Tasks, Members, and Divisions when activeProject changes
   const loadProjectData = async (projectId: string) => {
     if (!projectId) return;
     setLoading(true);
     try {
-      const [sprintsData, boardData, membersData] = await Promise.all([
+      const [sprintsData, boardData, membersData, divisionsData] = await Promise.all([
         apiGet<Sprint[]>(`/research/${projectId}/sprints`).catch(() => []),
         apiGet<any>(`/research/${projectId}/board`).catch(() => ({ tasks: [] })),
-        apiGet<any[]>(`/research/${projectId}/members`).catch(() => [])
+        apiGet<any[]>(`/research/${projectId}/members`).catch(() => []),
+        apiGet<any[]>(`/research/${projectId}/divisions`).catch(() => [])
       ]);
 
       setSprints(sprintsData || []);
       setTasks(boardData?.tasks || []);
+      setDivisions((divisionsData || []).map(normalizeDivisionItem));
       setMembers(
         (membersData || []).map((m: any) => ({
           userId: m.user_id || m.userId,
@@ -157,6 +175,77 @@ export default function ScrumPlanning() {
     setSearchParams({ projectId });
   };
 
+  // Division Actions (Kelola Divisi)
+  const handleCreateDivision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeProject?.id || !newDivisionName.trim()) return;
+    setDivisionActionLoading(true);
+    try {
+      await apiPost(`/research/${activeProject.id}/divisions`, { name: newDivisionName.trim() });
+      setNewDivisionName("");
+      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
+      setDivisions((divs || []).map(normalizeDivisionItem));
+    } catch (err: any) {
+      alert(err?.message || "Gagal menambahkan divisi.");
+    } finally {
+      setDivisionActionLoading(false);
+    }
+  };
+
+  const handleRenameDivision = async (divisionId: string) => {
+    if (!activeProject?.id || !editingDivisionName.trim()) return;
+    setDivisionActionLoading(true);
+    try {
+      await apiPatch(`/research/${activeProject.id}/divisions/${divisionId}`, { name: editingDivisionName.trim() });
+      setEditingDivisionId(null);
+      setEditingDivisionName("");
+      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
+      setDivisions((divs || []).map(normalizeDivisionItem));
+    } catch (err: any) {
+      alert(err?.message || "Gagal mengubah nama divisi.");
+    } finally {
+      setDivisionActionLoading(false);
+    }
+  };
+
+  const handleToggleDivisionStatus = async (divisionId: string, currentActive: boolean) => {
+    if (!activeProject?.id) return;
+    setDivisionActionLoading(true);
+    try {
+      await apiPatch(`/research/${activeProject.id}/divisions/${divisionId}`, { isActive: !currentActive });
+      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
+      setDivisions((divs || []).map(normalizeDivisionItem));
+    } catch (err: any) {
+      alert(err?.message || "Gagal mengubah status divisi.");
+    } finally {
+      setDivisionActionLoading(false);
+    }
+  };
+
+  const handleReorderDivision = async (divisionId: string, direction: "up" | "down") => {
+    if (!activeProject?.id) return;
+    const index = divisions.findIndex((d) => d.id === divisionId);
+    if (index < 0) return;
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= divisions.length) return;
+
+    const currentDiv = divisions[index];
+    const targetDiv = divisions[targetIndex];
+    setDivisionActionLoading(true);
+    try {
+      await Promise.all([
+        apiPatch(`/research/${activeProject.id}/divisions/${currentDiv.id}`, { sortOrder: targetDiv.sortOrder ?? targetIndex }),
+        apiPatch(`/research/${activeProject.id}/divisions/${targetDiv.id}`, { sortOrder: currentDiv.sortOrder ?? index })
+      ]);
+      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
+      setDivisions((divs || []).map(normalizeDivisionItem));
+    } catch (err: any) {
+      alert(err?.message || "Gagal mengubah urutan divisi.");
+    } finally {
+      setDivisionActionLoading(false);
+    }
+  };
+
   // Sprint Actions
   const handleCreateSprint = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,7 +270,7 @@ export default function ScrumPlanning() {
 
   const handleStartSprint = async (sprintId: string) => {
     if (!activeProject?.id) return;
-    if (!confirm("Mulai Sprint ini sekarang? Sprint aktif sebelumnya akan diselesaikan otomatis.")) return;
+    if (!confirm("Mulai Sprint ini sekarang?")) return;
 
     try {
       await apiPatch(`/research/${activeProject.id}/sprints/${sprintId}`, { status: "active" });
@@ -191,15 +280,15 @@ export default function ScrumPlanning() {
     }
   };
 
-  const handleCompleteSprint = async (sprintId: string) => {
+  const handleEndSprint = async (sprintId: string) => {
     if (!activeProject?.id) return;
-    if (!confirm("Selesaikan Sprint ini? Tugas yang belum selesai akan tetap tercatat.")) return;
+    if (!confirm(END_SPRINT_CONFIRMATION_MESSAGE)) return;
 
     try {
-      await apiPatch(`/research/${activeProject.id}/sprints/${sprintId}`, { status: "completed" });
+      await apiPatch(`/research/${activeProject.id}/sprints/${sprintId}`, { status: "review" });
       await loadProjectData(activeProject.id);
     } catch (err: any) {
-      alert(err?.message || "Gagal menyelesaikan sprint.");
+      alert(err?.message || "Gagal mengakhiri sprint.");
     }
   };
 
@@ -220,6 +309,12 @@ export default function ScrumPlanning() {
     e.preventDefault();
     if (!activeProject?.id || !taskForm.title.trim()) return;
 
+    const activeDivisions = divisions.filter((d) => d.isActive !== false);
+    if (!isEditingTask && activeDivisions.length > 0 && !taskForm.divisionId) {
+      alert("Divisi wajib dipilih untuk proyek ini.");
+      return;
+    }
+
     try {
       if (isEditingTask && taskForm.id) {
         await apiPatch(`/research/${activeProject.id}/board/tasks/${taskForm.id}`, {
@@ -227,7 +322,8 @@ export default function ScrumPlanning() {
           description: taskForm.description.trim() || null,
           storyPoints: taskForm.storyPoints,
           assigneeIds: taskForm.assigneeIds,
-          sprintId: taskForm.sprintId
+          sprintId: taskForm.sprintId,
+          divisionId: taskForm.divisionId || null
         });
       } else {
         await apiPost(`/research/${activeProject.id}/board/tasks`, {
@@ -236,12 +332,13 @@ export default function ScrumPlanning() {
           storyPoints: taskForm.storyPoints,
           assigneeIds: taskForm.assigneeIds,
           sprintId: taskForm.sprintId,
+          divisionId: taskForm.divisionId || null,
           status: "TO DO"
         });
       }
 
       setIsTaskModalOpen(false);
-      setTaskForm({ id: "", title: "", description: "", storyPoints: 3, assigneeIds: [], sprintId: null });
+      setTaskForm({ id: "", title: "", description: "", storyPoints: 3, assigneeIds: [], sprintId: null, divisionId: "" });
       await loadProjectData(activeProject.id);
     } catch (err: any) {
       alert(err?.message || "Gagal menyimpan task.");
@@ -279,7 +376,8 @@ export default function ScrumPlanning() {
       description: task.description || "",
       storyPoints: task.storyPoints ?? task.story_points ?? 3,
       assigneeIds: task.assigneeIds || task.assignee_ids || [],
-      sprintId: task.sprintId ?? task.sprint_id ?? null
+      sprintId: task.sprintId ?? task.sprint_id ?? null,
+      divisionId: task.divisionId ?? task.division_id ?? ""
     });
     setIsTaskModalOpen(true);
   };
@@ -292,7 +390,8 @@ export default function ScrumPlanning() {
       description: "",
       storyPoints: 3,
       assigneeIds: [],
-      sprintId: defaultSprintId
+      sprintId: defaultSprintId,
+      divisionId: ""
     });
     setIsTaskModalOpen(true);
   };
@@ -345,14 +444,32 @@ export default function ScrumPlanning() {
             </select>
 
             {activeProject && (
-              <button
-                onClick={() => navigate(`/operator/riset?projectId=${activeProject.id}`)}
-                className="h-11 px-4 bg-slate-100 hover:bg-slate-200 text-foreground text-xs font-black rounded-xl transition-colors flex items-center gap-2"
-                title="Buka Papan Kanban Utama"
-              >
-                <span>Live Kanban</span>
-                <ExternalLink size={14} />
-              </button>
+              <>
+                <button
+                  onClick={() => setIsDivisionModalOpen(true)}
+                  className="h-11 px-4 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-black rounded-xl transition-colors flex items-center gap-2 border border-purple-200"
+                  title="Kelola Divisi Riset"
+                >
+                  <Layers size={14} />
+                  <span>Kelola Divisi</span>
+                </button>
+                <button
+                  onClick={() => navigate(isDosen ? `/dosen/scrum?projectId=${activeProject.id}` : `/operator/scrum?projectId=${activeProject.id}`)}
+                  className="h-11 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-2 shadow-sm"
+                  title="Buka Sprint Summary & Review"
+                >
+                  <span>Buka Sprint Summary</span>
+                  <ExternalLink size={14} />
+                </button>
+                <button
+                  onClick={() => navigate(isDosen ? `/dosen/riset?projectId=${activeProject.id}` : `/operator/riset?projectId=${activeProject.id}`)}
+                  className="h-11 px-4 bg-slate-100 hover:bg-slate-200 text-foreground text-xs font-black rounded-xl transition-colors flex items-center gap-2"
+                  title="Buka Papan Kanban Utama"
+                >
+                  <span>Live Kanban</span>
+                  <ExternalLink size={14} />
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -464,6 +581,10 @@ export default function ScrumPlanning() {
                 backlogTasks.map((task) => {
                   const sp = task.storyPoints ?? task.story_points ?? 3;
                   const taskAssignees = task.assignees || [];
+                  const taskDivisionName =
+                    task.divisionName ||
+                    task.division_name ||
+                    divisions.find((d) => d.id === (task.divisionId ?? task.division_id))?.name;
 
                   return (
                     <div
@@ -495,10 +616,20 @@ export default function ScrumPlanning() {
                       )}
 
                       <div className="flex items-center justify-between pt-1 border-t border-slate-200/50">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-50 text-purple-700 border border-purple-200">
                             ⚡ {sp} SP
                           </span>
+
+                          {taskDivisionName ? (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              {taskDivisionName}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-500 border border-dashed border-slate-300">
+                              Belum Ada Divisi
+                            </span>
+                          )}
 
                           <div className="flex items-center -space-x-1">
                             {taskAssignees.map((a: any, i: number) => (
@@ -530,10 +661,10 @@ export default function ScrumPlanning() {
                                 + Masukkan ke Sprint...
                               </option>
                               {sprints
-                                .filter((s) => s.status !== "completed")
+                                .filter((s) => s.status !== "completed" && s.status !== "closed")
                                 .map((s) => (
                                   <option key={s.id} value={s.id}>
-                                    {s.name} {s.status === "active" ? "(Aktif)" : ""}
+                                    {s.name} {s.status === "active" ? "(Aktif)" : s.status === "review" ? "(Review)" : ""}
                                   </option>
                                 ))}
                             </select>
@@ -586,8 +717,10 @@ export default function ScrumPlanning() {
                   const sprintTasks = tasks.filter(
                     (t) => (t.sprintId ?? t.sprint_id) === sprint.id
                   );
+                  const isPlanning = sprint.status === "planning";
                   const isActive = sprint.status === "active";
-                  const isCompleted = sprint.status === "completed";
+                  const isReview = sprint.status === "review";
+                  const isClosed = sprint.status === "closed" || sprint.status === "completed";
 
                   return (
                     <div
@@ -595,7 +728,9 @@ export default function ScrumPlanning() {
                       className={`bg-white rounded-[20px] border transition-all p-5 flex flex-col gap-4 shadow-sm ${
                         isActive
                           ? "border-purple-300 ring-2 ring-purple-100 bg-purple-50/10"
-                          : isCompleted
+                          : isReview
+                          ? "border-amber-300 ring-2 ring-amber-100 bg-amber-50/10"
+                          : isClosed
                           ? "border-slate-200 opacity-80"
                           : "border-border"
                       }`}
@@ -609,12 +744,20 @@ export default function ScrumPlanning() {
                               className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                                 isActive
                                   ? "bg-purple-100 text-purple-700 animate-pulse"
-                                  : isCompleted
+                                  : isReview
+                                  ? "bg-amber-100 text-amber-800"
+                                  : isClosed
                                   ? "bg-slate-100 text-slate-600"
                                   : "bg-blue-50 text-blue-700"
                               }`}
                             >
-                              {isActive ? "Sedang Aktif" : isCompleted ? "Selesai" : "Planning"}
+                              {isActive
+                                ? "Sedang Aktif"
+                                : isReview
+                                ? "MENUNGGU REVIEW"
+                                : isClosed
+                                ? "Selesai"
+                                : "Planning"}
                             </span>
                             <span className="text-xs font-black text-purple-700">
                               ⚡ {sprint.totalPoints} SP
@@ -622,6 +765,11 @@ export default function ScrumPlanning() {
                           </div>
                           {sprint.goal && (
                             <p className="text-xs text-muted-foreground mt-0.5">{sprint.goal}</p>
+                          )}
+                          {isReview && (
+                            <p className="text-xs text-amber-700 mt-1 font-medium">
+                              Sprint sedang dalam tahap Review. Summary dan evaluasi Sprint perlu diselesaikan sebelum Sprint berikutnya dapat dimulai.
+                            </p>
                           )}
                           {(sprint.startDate || sprint.endDate) && (
                             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-1">
@@ -635,7 +783,7 @@ export default function ScrumPlanning() {
 
                         {/* Sprint Controls */}
                         <div className="flex items-center gap-2">
-                          {!isCompleted && !isActive && (
+                          {isPlanning && (
                             <button
                               onClick={() => handleStartSprint(sprint.id)}
                               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-1 shadow-sm"
@@ -647,29 +795,53 @@ export default function ScrumPlanning() {
 
                           {isActive && (
                             <button
-                              onClick={() => handleCompleteSprint(sprint.id)}
+                              onClick={() => handleEndSprint(sprint.id)}
                               className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-1 shadow-sm"
                             >
                               <CheckCircle2 size={14} />
-                              <span>Selesaikan Sprint</span>
+                              <span>Akhiri Sprint</span>
                             </button>
                           )}
 
-                          <button
-                            onClick={() => openCreateTaskModal(sprint.id)}
-                            className="p-1.5 hover:bg-slate-100 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
-                            title="Tambah task ke sprint ini"
-                          >
-                            <Plus size={16} />
-                          </button>
+                          {isReview && (
+                            <button
+                              onClick={() => navigate(isDosen ? `/dosen/scrum?projectId=${activeProject?.id}&sprintId=${sprint.id}` : `/operator/scrum?projectId=${activeProject?.id}&sprintId=${sprint.id}`)}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-1 shadow-sm"
+                            >
+                              <FileText size={14} />
+                              <span>Buka Summary</span>
+                            </button>
+                          )}
 
-                          <button
-                            onClick={() => handleDeleteSprint(sprint.id)}
-                            className="p-1.5 hover:bg-red-50 text-muted-foreground hover:text-red-500 rounded-lg transition-colors"
-                            title="Hapus sprint"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {isClosed && (
+                            <button
+                              onClick={() => navigate(isDosen ? `/dosen/scrum?projectId=${activeProject?.id}&sprintId=${sprint.id}` : `/operator/scrum?projectId=${activeProject?.id}&sprintId=${sprint.id}`)}
+                              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-1 shadow-sm"
+                            >
+                              <FileText size={14} />
+                              <span>Lihat Summary</span>
+                            </button>
+                          )}
+
+                          {!isClosed && (
+                            <button
+                              onClick={() => openCreateTaskModal(sprint.id)}
+                              className="p-1.5 hover:bg-slate-100 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                              title="Tambah task ke sprint ini"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          )}
+
+                          {isPlanning && (
+                            <button
+                              onClick={() => handleDeleteSprint(sprint.id)}
+                              className="p-1.5 hover:bg-red-50 text-muted-foreground hover:text-red-500 rounded-lg transition-colors"
+                              title="Hapus sprint"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -684,6 +856,10 @@ export default function ScrumPlanning() {
                             const sp = task.storyPoints ?? task.story_points ?? 3;
                             const taskAssignees = task.assignees || [];
                             const isTaskDone = task.status === "DONE";
+                            const taskDivisionName =
+                              task.divisionName ||
+                              task.division_name ||
+                              divisions.find((d) => d.id === (task.divisionId ?? task.division_id))?.name;
 
                             return (
                               <div
@@ -715,10 +891,20 @@ export default function ScrumPlanning() {
                                   </span>
                                 </div>
 
-                                <div className="flex items-center gap-3 shrink-0">
+                                <div className="flex items-center gap-3 shrink-0 flex-wrap">
                                   <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-50 text-purple-700 border border-purple-200">
                                     ⚡ {sp} SP
                                   </span>
+
+                                  {taskDivisionName ? (
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                      {taskDivisionName}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-500 border border-dashed border-slate-300">
+                                      Belum Ada Divisi
+                                    </span>
+                                  )}
 
                                   <div className="flex items-center -space-x-1">
                                     {taskAssignees.map((a: any, i: number) => (
@@ -961,6 +1147,29 @@ export default function ScrumPlanning() {
                 </p>
               </div>
 
+              {/* Division Selection */}
+              <div>
+                <label className="text-xs font-black text-foreground block mb-1">
+                  Divisi {divisions.filter((d) => d.isActive !== false).length > 0 && <span className="text-red-500">*</span>}
+                </label>
+                <select
+                  value={taskForm.divisionId || ""}
+                  onChange={(e) => setTaskForm({ ...taskForm, divisionId: e.target.value || null })}
+                  className="w-full h-10 px-3 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                >
+                  {divisions.filter((d) => d.isActive !== false).length > 0 ? (
+                    <option value="">-- Pilih Divisi --</option>
+                  ) : (
+                    <option value="">Tanpa Divisi (Proyek belum memiliki divisi)</option>
+                  )}
+                  {divisions.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} {d.isActive === false ? "(Nonaktif)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Sprint Destination */}
               <div>
                 <label className="text-xs font-black text-foreground block mb-1">Tujuan Sprint</label>
@@ -971,10 +1180,10 @@ export default function ScrumPlanning() {
                 >
                   <option value="">Simpan di Product Backlog (Belum dijadwalkan)</option>
                   {sprints
-                    .filter((s) => s.status !== "completed")
+                    .filter((s) => s.status !== "completed" && s.status !== "closed")
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} {s.status === "active" ? "(Sedang Aktif)" : ""}
+                        {s.name} {s.status === "active" ? "(Sedang Aktif)" : s.status === "review" ? "(Review)" : ""}
                       </option>
                     ))}
                 </select>
@@ -996,6 +1205,179 @@ export default function ScrumPlanning() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Kelola Divisi Modal ══ */}
+      {isDivisionModalOpen && activeProject && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => {
+            setIsDivisionModalOpen(false);
+            setEditingDivisionId(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-[24px] shadow-2xl w-full max-w-lg p-6 flex flex-col gap-4 border border-border max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-purple-50 text-purple-600 rounded-xl">
+                  <Layers size={20} />
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-foreground">Kelola Divisi Proyek</h3>
+                  <p className="text-xs text-muted-foreground">{activeProject.short_title || activeProject.title}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsDivisionModalOpen(false);
+                  setEditingDivisionId(null);
+                }}
+                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-500 flex items-center justify-center transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex flex-col gap-4 pr-1">
+              {/* Form Tambah Divisi */}
+              <form onSubmit={handleCreateDivision} className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Nama Divisi baru (cth: Web, IoT, AI)..."
+                  value={newDivisionName}
+                  onChange={(e) => setNewDivisionName(e.target.value)}
+                  className="flex-1 h-10 px-3.5 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={!newDivisionName.trim() || divisionActionLoading}
+                  className="px-4 h-10 bg-primary hover:bg-primary/90 disabled:opacity-50 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-1.5 shrink-0 shadow-sm"
+                >
+                  <Plus size={14} strokeWidth={3} />
+                  <span>Tambah</span>
+                </button>
+              </form>
+
+              {/* Daftar Divisi */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-border">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Daftar Divisi ({divisions.length})
+                </span>
+
+                {divisions.length === 0 ? (
+                  <div className="p-6 text-center border-2 border-dashed border-border rounded-xl text-xs text-muted-foreground">
+                    Belum ada divisi untuk proyek ini. Silakan tambah divisi di atas.
+                  </div>
+                ) : (
+                  divisions.map((div, index) => {
+                    const isEditing = editingDivisionId === div.id;
+                    return (
+                      <div
+                        key={div.id}
+                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2"
+                      >
+                        {isEditing ? (
+                          <div className="flex items-center gap-2 flex-1">
+                            <input
+                              type="text"
+                              value={editingDivisionName}
+                              onChange={(e) => setEditingDivisionName(e.target.value)}
+                              className="flex-1 h-8 px-2.5 text-xs bg-white border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleRenameDivision(div.id)}
+                              disabled={!editingDivisionName.trim() || divisionActionLoading}
+                              className="px-2.5 h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
+                            >
+                              Simpan
+                            </button>
+                            <button
+                              onClick={() => setEditingDivisionId(null)}
+                              className="px-2.5 h-8 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-lg"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span
+                                className={`w-2 h-2 rounded-full shrink-0 ${
+                                  div.isActive !== false ? "bg-emerald-500" : "bg-slate-300"
+                                }`}
+                              />
+                              <span
+                                className={`text-xs font-bold truncate ${
+                                  div.isActive === false ? "text-muted-foreground line-through" : "text-foreground"
+                                }`}
+                              >
+                                {div.name}
+                              </span>
+                              {div.isActive === false && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.2 bg-slate-200 text-slate-600 rounded">
+                                  Nonaktif
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {/* Reorder Up */}
+                              <button
+                                onClick={() => handleReorderDivision(div.id, "up")}
+                                disabled={index === 0 || divisionActionLoading}
+                                className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground disabled:opacity-30 rounded-lg transition-colors"
+                                title="Pindah ke atas"
+                              >
+                                <ChevronUp size={14} />
+                              </button>
+                              {/* Reorder Down */}
+                              <button
+                                onClick={() => handleReorderDivision(div.id, "down")}
+                                disabled={index === divisions.length - 1 || divisionActionLoading}
+                                className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground disabled:opacity-30 rounded-lg transition-colors"
+                                title="Pindah ke bawah"
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                              {/* Edit name */}
+                              <button
+                                onClick={() => {
+                                  setEditingDivisionId(div.id);
+                                  setEditingDivisionName(div.name);
+                                }}
+                                className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                                title="Ubah Nama"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              {/* Toggle active */}
+                              <button
+                                onClick={() => handleToggleDivisionStatus(div.id, div.isActive !== false)}
+                                disabled={divisionActionLoading}
+                                className={`px-2 py-1 text-[10px] font-black rounded-lg border transition-colors ${
+                                  div.isActive !== false
+                                    ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200"
+                                    : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                                }`}
+                                title={div.isActive !== false ? "Nonaktifkan divisi" : "Aktifkan divisi"}
+                              >
+                                {div.isActive !== false ? "Nonaktifkan" : "Aktifkan"}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

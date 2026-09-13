@@ -24,6 +24,7 @@ import {
   LogOut,
   Menu,
   Kanban,
+  GitBranch,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AppNotification, useNotifications } from "../../hooks/useNotifications";
@@ -38,7 +39,8 @@ const NAV_ITEMS = [
   { name: "Database Kegiatan", path: "/operator/kegiatan", icon: CalendarCheck },
   { name: "Database Riset", path: "/operator/riset", icon: FlaskConical },
   { name: "Keanggotaan Riset", path: "/operator/keanggotaan", icon: Users },
-  { name: "Scrum & Sprint", path: "/operator/scrum", icon: Kanban },
+  { name: "Sprint Summary", path: "/operator/scrum", icon: Kanban },
+  { name: "GitHub Development", path: "/operator/github", icon: GitBranch },
   { name: "Database Dosen", path: "/operator/dosen", icon: Users },
   { name: "Database Admin", path: "/operator/operator", icon: Settings2 },
   { name: "Logbook Mahasiswa", path: "/operator/logbook", icon: BookOpen },

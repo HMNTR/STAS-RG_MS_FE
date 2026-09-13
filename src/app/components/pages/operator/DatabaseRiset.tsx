@@ -800,39 +800,44 @@ export default function DatabaseRiset() {
                       <h3 className="font-black text-foreground text-sm">Daftar Mahasiswa per Riset</h3>
                     </div>
                     <div className="overflow-x-auto">
-                      <div className="min-w-[900px]">
+                      <div className="min-w-[1080px]">
                         {/* Table Header */}
-                        <div className="flex px-5 py-3.5 bg-slate-50/80 border-b border-border">
-                          <div className="w-[220px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Riset / Proyek</div>
-                          <div className="w-[180px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Ketua / PIC</div>
-                          <div className="flex-1 text-[11px] font-black text-muted-foreground uppercase tracking-wide">Mahasiswa</div>
-                          <div className="w-[130px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Tipe Mahasiswa</div>
-                          <div className="w-[120px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Status</div>
-                          <div className="w-[160px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Peran dalam Riset</div>
-                          <div className="w-[120px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Tgl Bergabung</div>
+                        <div className="px-4 py-3 bg-slate-50/80 border-b border-border">
+                          <div className="flex border border-transparent">
+                            <div className="w-[220px] shrink-0 px-4 border-r border-transparent text-[11px] font-black text-muted-foreground uppercase tracking-wide">Riset / Proyek</div>
+                            <div className="w-[180px] shrink-0 px-4 border-r border-transparent text-[11px] font-black text-muted-foreground uppercase tracking-wide">Ketua / PIC</div>
+                            <div className="flex-1 flex px-4 items-center min-w-0">
+                              <div className="flex-1 min-w-[180px] text-[11px] font-black text-muted-foreground uppercase tracking-wide">Mahasiswa</div>
+                              <div className="w-[130px] shrink-0 text-[11px] font-black text-muted-foreground uppercase tracking-wide">Tipe Mahasiswa</div>
+                              <div className="w-[110px] shrink-0 text-[11px] font-black text-muted-foreground uppercase tracking-wide">Status</div>
+                              <div className="w-[160px] shrink-0 text-[11px] font-black text-muted-foreground uppercase tracking-wide">Peran dalam Riset</div>
+                              <div className="w-[120px] shrink-0 text-[11px] font-black text-muted-foreground uppercase tracking-wide">Tgl Bergabung</div>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Table Body / Groups */}
                         <div className="flex flex-col gap-4 p-4 bg-slate-50/30">
                           {Object.values(ringkasanGrouped).map((group: any) => (
                             <div key={group.projectId} className="flex bg-white border border-border rounded-[14px] shadow-sm overflow-hidden transition-all hover:shadow-md hover:border-emerald-200">
-                              <div className="w-[220px] p-4 border-r border-border/40 bg-slate-50/30 flex flex-col justify-start">
+                              <div className="w-[220px] shrink-0 p-4 border-r border-border/40 bg-slate-50/30 flex flex-col justify-start">
                                 <p className="font-black text-emerald-700 text-[13px] leading-snug mb-2">{group.projectName}</p>
                                 <div className="mt-auto pt-2 flex flex-col gap-2">
                                   <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border self-start ${statusColor(group.projectStatus)}`}>{group.projectStatus}</span>
                                   
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openProgressBoard(group.projectId); }}
-                                    className="w-full h-7 flex items-center justify-center gap-1.5 text-[10px] font-black text-emerald-600 bg-emerald-100 hover:bg-emerald-200 hover:text-emerald-700 rounded-[6px] transition-colors border border-emerald-200 mt-1"
+                                    className="w-full py-1.5 px-2 flex items-center justify-center gap-1.5 text-[10px] font-black text-emerald-600 bg-emerald-100 hover:bg-emerald-200 hover:text-emerald-700 rounded-[8px] transition-colors border border-emerald-200 mt-1 whitespace-nowrap"
                                   >
-                                    <Kanban size={11} /> Lihat Board
+                                    <Kanban size={12} className="shrink-0" />
+                                    <span>Lihat Board</span>
                                   </button>
                                 </div>
                               </div>
-                              <div className="w-[180px] p-4 border-r border-border/40 bg-slate-50/30 flex flex-col justify-start">
+                              <div className="w-[180px] shrink-0 p-4 border-r border-border/40 bg-slate-50/30 flex flex-col justify-start">
                                 <p className="font-medium text-foreground text-[11px] leading-tight">{group.picName}</p>
                               </div>
-                              <div className="flex-1 flex flex-col">
+                              <div className="flex-1 flex flex-col min-w-0">
                                 {group.members.map((member: any, i: number) => {
                                   const isMagangUtama = member.tipe === "Magang" && member.peranDalamRiset === "Proyek Utama";
                                   const isMagangTambahan = member.tipe === "Magang" && member.peranDalamRiset === "Proyek Tambahan";
@@ -850,10 +855,10 @@ export default function DatabaseRiset() {
 
                                   return (
                                     <div key={member.id} className={`flex items-center px-4 py-3 hover:bg-slate-50/70 transition-colors ${!isLastInGroup ? 'border-b border-border/40' : ''}`}>
-                                      <div className="flex-1">
+                                      <div className="flex-1 min-w-[180px]">
                                         <div className="flex items-center gap-2">
                                           <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black bg-slate-100 text-slate-600 shrink-0">
-                                            {member.initials || member.name.charAt(0)}
+                                            {member.initials || member.name?.charAt(0)}
                                           </div>
                                           <button
                                             onClick={(e) => {
@@ -861,16 +866,16 @@ export default function DatabaseRiset() {
                                               setSelectedStudentId(member.studentId || member.id);
                                               setIsStudentModalOpen(true);
                                             }}
-                                            className="font-bold text-emerald-700 hover:text-emerald-800 hover:underline text-xs truncate max-w-[150px] text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded px-1 -ml-1 transition-colors"
+                                            className="font-bold text-emerald-700 hover:text-emerald-800 hover:underline text-xs truncate max-w-[220px] text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded px-1 -ml-1 transition-colors"
                                           >
                                             {member.name}
                                           </button>
                                         </div>
                                       </div>
-                                      <div className="w-[130px]">
+                                      <div className="w-[130px] shrink-0">
                                         <span className={`text-[10px] font-black ${tipeColor}`}>{member.tipe === "Riset" ? "Mahasiswa Riset" : "Magang"}</span>
                                       </div>
-                                      <div className="w-[120px]">
+                                      <div className="w-[110px] shrink-0">
                                         <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${
                                           !member.status || member.status === 'Aktif' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
                                           member.status === 'Cuti' ? 'bg-amber-100 text-amber-700 border-amber-200' :
@@ -880,13 +885,13 @@ export default function DatabaseRiset() {
                                           {member.status || "Aktif"}
                                         </span>
                                       </div>
-                                      <div className="w-[160px]">
+                                      <div className="w-[160px] shrink-0">
                                         <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] border ${roleColor}`}>
                                           <div className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
                                           <span className="text-[9px] font-black leading-none">{member.peranDalamRiset}</span>
                                         </div>
                                       </div>
-                                      <div className="w-[120px]">
+                                      <div className="w-[120px] shrink-0">
                                         <span className="text-xs text-muted-foreground font-medium">
                                           {formatDisplayDate(member.bergabung)}
                                         </span>
