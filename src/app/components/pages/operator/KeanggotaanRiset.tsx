@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { OperatorLayout } from "../../templates/OperatorLayout";
 import { Search, Plus, X, Trash2, Pencil, Users, CheckCheck } from "lucide-react";
-import { apiGet, apiPatch, apiPost } from "../../../lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../../../lib/api";
 import { getResearchRoleOptions, MAHASISWA_LEADER_ROLE, normalizeResearchRoleForMemberType } from "../../../lib/researchRoles";
 
 const PERAN_COLOR: Record<string, string> = {
@@ -26,6 +26,10 @@ export default function KeanggotaanRiset() {
   const [allLecturers, setAllLecturers] = useState<Array<any>>([]);
   const [search, setSearch] = useState("");
   const [addModal, setAddModal] = useState(false);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
+  const [newMemberRole, setNewMemberRole] = useState("Anggota");
+  const [addPersonSearch, setAddPersonSearch] = useState("");
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
   const [editMember, setEditMember] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
   const [error, setError] = useState("");
@@ -97,8 +101,8 @@ export default function KeanggotaanRiset() {
   });
 
   const allPeople = [
-    ...allStudents.map((m, index) => ({ id: m.id, nama: m.name, initials: m.initials || m.name?.slice(0, 2)?.toUpperCase(), photoUrl: m.photo_url || m.photoUrl || null, color: ["bg-[#8B6FFF] text-white", "bg-emerald-500 text-white", "bg-pink-500 text-white"][index % 3], tipe: "Mahasiswa" as const })),
-    ...allLecturers.map((d, index) => ({ id: d.id, nama: d.name, initials: d.initials || d.name?.slice(0, 2)?.toUpperCase(), photoUrl: d.photo_url || d.photoUrl || null, color: ["bg-blue-500 text-white", "bg-teal-500 text-white"][index % 2], tipe: "Dosen" as const })),
+    ...allStudents.map((m, index) => ({ id: m.user_id || m.id, nama: m.name, initials: m.initials || m.name?.slice(0, 2)?.toUpperCase(), photoUrl: m.photo_url || m.photoUrl || null, color: ["bg-[#8B6FFF] text-white", "bg-emerald-500 text-white", "bg-pink-500 text-white"][index % 3], tipe: "Mahasiswa" as const })),
+    ...allLecturers.map((d, index) => ({ id: d.user_id || d.id, nama: d.name, initials: d.initials || d.name?.slice(0, 2)?.toUpperCase(), photoUrl: d.photo_url || d.photoUrl || null, color: ["bg-blue-500 text-white", "bg-teal-500 text-white"][index % 2], tipe: "Dosen" as const })),
   ].filter(p => !members.some(m => m.memberId === p.id));
 
   const selectedEditMember = membersMap[selectedRiset]?.find((member) => member.memberId === editMember);
@@ -174,6 +178,72 @@ export default function KeanggotaanRiset() {
       setJoinRequestsMap((prev) => ({ ...prev, [selectedRiset]: reqs || [] }));
     } catch (err: any) {
       setError(err?.message || "Gagal menolak permintaan");
+    }
+  };
+
+  const handleAddMembers = async () => {
+    if (!selectedRiset || selectedPersonIds.length === 0) return;
+    setIsSubmittingAdd(true);
+    setError("");
+    try {
+      for (const personId of selectedPersonIds) {
+        const person = allPeople.find(p => p.id === personId);
+        if (!person) continue;
+        await apiPost(`/research/${selectedRiset}/members`, {
+          userId: person.id,
+          memberType: person.tipe,
+          peran: newMemberRole || "Anggota",
+          status: "Aktif",
+          bergabung: new Date().toISOString().slice(0, 10),
+        });
+      }
+      const members = await apiGet<Array<any>>(`/research/${selectedRiset}/members`);
+      setMembersMap((prev) => ({
+        ...prev,
+        [selectedRiset]: (members || []).map((member) => ({
+          memberId: member.user_id,
+          nama: member.name,
+          initials: member.initials,
+          photoUrl: member.photo_url || member.photoUrl || null,
+          color: member.member_type === "Dosen" ? "bg-blue-500 text-white" : "bg-[#8B6FFF] text-white",
+          tipe: member.member_type,
+          peran: member.peran || "Anggota",
+          bergabung: member.bergabung || "-",
+          status: member.status || "Aktif"
+        }))
+      }));
+      setAddModal(false);
+      setSelectedPersonIds([]);
+      setAddPersonSearch("");
+    } catch (err: any) {
+      setError(err?.message || "Gagal menambahkan anggota");
+    } finally {
+      setIsSubmittingAdd(false);
+    }
+  };
+
+  const handleDeleteMember = async (memberId: string, memberName: string) => {
+    if (!selectedRiset) return;
+    if (!window.confirm(`Hapus ${memberName} dari keanggotaan riset ini?`)) return;
+    try {
+      await apiDelete(`/research/${selectedRiset}/members/${memberId}`);
+      const members = await apiGet<Array<any>>(`/research/${selectedRiset}/members`);
+      setMembersMap((prev) => ({
+        ...prev,
+        [selectedRiset]: (members || []).map((member) => ({
+          memberId: member.user_id,
+          nama: member.name,
+          initials: member.initials,
+          photoUrl: member.photo_url || member.photoUrl || null,
+          color: member.member_type === "Dosen" ? "bg-blue-500 text-white" : "bg-[#8B6FFF] text-white",
+          tipe: member.member_type,
+          peran: member.peran || "Anggota",
+          bergabung: member.bergabung || "-",
+          status: member.status || "Aktif"
+        }))
+      }));
+    } catch (err: any) {
+      setError(err?.message || "Gagal menghapus anggota");
     }
   };
 
@@ -309,7 +379,7 @@ export default function KeanggotaanRiset() {
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-1">
                         <button onClick={() => openEditMemberRole(m)} className="w-7 h-7 rounded-[8px] flex items-center justify-center text-muted-foreground hover:bg-amber-50 hover:text-amber-600 transition-colors" title="Edit peran"><Pencil size={13} /></button>
-                        <button className="w-7 h-7 rounded-[8px] flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors" title="Hapus"><Trash2 size={13} /></button>
+                        <button onClick={() => handleDeleteMember(m.memberId, m.nama)} className="w-7 h-7 rounded-[8px] flex items-center justify-center text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors" title="Hapus"><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
@@ -334,34 +404,66 @@ export default function KeanggotaanRiset() {
             <div className="p-6">
               <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-border rounded-[10px] mb-4">
                 <Search size={15} className="text-muted-foreground" />
-                <input placeholder="Cari mahasiswa atau dosen..." className="bg-transparent outline-none text-sm w-full placeholder:text-muted-foreground" />
+                <input
+                  value={addPersonSearch}
+                  onChange={e => setAddPersonSearch(e.target.value)}
+                  placeholder="Cari mahasiswa atau dosen..."
+                  className="bg-transparent outline-none text-sm w-full placeholder:text-muted-foreground"
+                />
               </div>
               <div className="flex flex-col gap-2 max-h-[250px] overflow-y-auto">
-                {allPeople.slice(0, 8).map(p => (
-                  <label key={p.id} className="flex items-center gap-3 p-3 rounded-[10px] border border-border hover:bg-slate-50 cursor-pointer transition-colors">
-                    <input type="checkbox" className="accent-amber-500 shrink-0" />
-                    {p.photoUrl ? (
-                      <img src={p.photoUrl} alt={p.nama} className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-200" />
-                    ) : (
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${p.color}`}>{p.initials}</div>
-                    )}
-                    <div className="flex-1">
-                      <p className="text-sm font-black text-foreground">{p.nama}</p>
-                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${p.tipe === "Dosen" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{p.tipe}</span>
-                    </div>
-                  </label>
-                ))}
+                {allPeople
+                  .filter(p => !addPersonSearch || p.nama.toLowerCase().includes(addPersonSearch.toLowerCase()))
+                  .map(p => {
+                    const isChecked = selectedPersonIds.includes(p.id);
+                    return (
+                      <label key={p.id} className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-colors ${isChecked ? 'bg-amber-50/60 border-amber-300' : 'border-border hover:bg-slate-50'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            setSelectedPersonIds(prev =>
+                              isChecked ? prev.filter(id => id !== p.id) : [...prev, p.id]
+                            );
+                          }}
+                          className="accent-amber-500 shrink-0"
+                        />
+                        {p.photoUrl ? (
+                          <img src={p.photoUrl} alt={p.nama} className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-200" />
+                        ) : (
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${p.color}`}>{p.initials}</div>
+                        )}
+                        <div className="flex-1">
+                          <p className="text-sm font-black text-foreground">{p.nama}</p>
+                          <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${p.tipe === "Dosen" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{p.tipe}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                {allPeople.length === 0 && (
+                  <p className="text-xs text-center text-muted-foreground py-4">Semua orang sudah tergabung dalam riset ini.</p>
+                )}
               </div>
               <div className="mt-4">
                 <label className="text-xs font-black text-foreground block mb-1.5">Peran</label>
-                <select className="w-full h-10 px-3 rounded-[10px] border border-border text-sm focus:outline-none cursor-pointer">
-                  {Object.keys(PERAN_COLOR).map(p => <option key={p}>{p}</option>)}
+                <select
+                  value={newMemberRole}
+                  onChange={e => setNewMemberRole(e.target.value)}
+                  className="w-full h-10 px-3 rounded-[10px] border border-border text-sm focus:outline-none cursor-pointer"
+                >
+                  {Object.keys(PERAN_COLOR).map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
             </div>
             <div className="px-6 pb-6 flex gap-3">
-              <button onClick={() => setAddModal(false)} className="flex-1 h-10 border border-border rounded-[10px] text-sm font-bold text-muted-foreground hover:bg-slate-50 transition-colors">Batal</button>
-              <button onClick={() => setAddModal(false)} className="flex-1 h-10 bg-amber-500 hover:bg-amber-600 text-white text-sm font-black rounded-[10px] transition-colors">Tambahkan</button>
+              <button onClick={() => { setAddModal(false); setSelectedPersonIds([]); }} className="flex-1 h-10 border border-border rounded-[10px] text-sm font-bold text-muted-foreground hover:bg-slate-50 transition-colors">Batal</button>
+              <button
+                onClick={handleAddMembers}
+                disabled={selectedPersonIds.length === 0 || isSubmittingAdd}
+                className="flex-1 h-10 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-black rounded-[10px] transition-colors shadow-sm"
+              >
+                {isSubmittingAdd ? "Menambahkan..." : `Tambahkan (${selectedPersonIds.length})`}
+              </button>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React from "react";
-import { createBrowserRouter, Navigate, Outlet } from "react-router";
+import { createBrowserRouter, Navigate, Outlet, useRouteError } from "react-router";
 import { useAuth } from "./context/AuthContext";
 import type { UserRole } from "./context/AuthContext";
 import Login from "./components/pages/Login";
@@ -105,15 +105,43 @@ function RequireNonAlumni() {
   return <Outlet />;
 }
 
+function RouteErrorBoundary() {
+  const error = useRouteError();
+  console.error("Router error caught by RouteErrorBoundary:", error);
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen text-muted-foreground p-4 text-center">
+      <p className="font-semibold text-lg mb-2 text-foreground">Terjadi kesalahan pada aplikasi.</p>
+      <p className="text-sm max-w-md mb-4">Silakan muat ulang halaman atau kembali ke halaman login.</p>
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition"
+        >
+          Muat Ulang
+        </button>
+        <a
+          href="/login"
+          className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-100 transition"
+        >
+          Ke Login
+        </a>
+      </div>
+      {typeof window !== "undefined" && window.location.hostname === "localhost" && (
+        <pre className="mt-4 max-w-xl overflow-auto text-left text-xs text-red-500 bg-red-50 p-3 rounded-lg border border-red-200">
+          {error instanceof Error ? error.stack || error.message : String(error)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <Outlet />,
-    errorElement: (
-      <div className="flex items-center justify-center h-screen text-muted-foreground">
-        Halaman tidak ditemukan.
-      </div>
-    ),
+    errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: <Navigate to="/login" replace /> },
       { path: "login", element: <Login /> },

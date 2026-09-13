@@ -56,6 +56,8 @@ function isActiveAccessLock(lock: StudentAccessLock | null) {
 
 function getAccessLockReasonLabel(reason?: string | null) {
   if (reason === "ATTENDANCE_ABSENT") return "Tidak Hadir";
+  if (reason === "CHECKOUT_MISSING_22") return "Belum Checkout Sampai 22.00 WIB";
+  if (reason === "WORK_HOURS_UNDER_8") return "Jam Kerja Magang Kurang dari 8 Jam";
   if (reason === "RISET_WEEKLY_HOURS_UNDER_TARGET") return "Jam Kerja Riset Mingguan Tidak Terpenuhi";
   if (reason === "PICKET_SUBMISSION_INVALID") return "Piket Tidak Sesuai";
   if (reason === "PICKET_SUBMISSION_MISSING") return "Belum Melakukan Piket";
@@ -63,11 +65,20 @@ function getAccessLockReasonLabel(reason?: string | null) {
 }
 
 function getAccessLockDefaultMessage(reason?: string | null, date?: string | null) {
+  if (reason === "CHECKOUT_MISSING_22") {
+    return "Akses dikunci karena Anda belum melakukan check-out absensi sampai pukul 22.00 WIB. Hubungi admin untuk membuka kembali akses website.";
+  }
+  if (reason === "WORK_HOURS_UNDER_8") {
+    return "Akses dikunci karena durasi kerja Magang hari ini kurang dari 8 jam. Hubungi admin untuk membuka kembali akses website.";
+  }
   if (reason === "RISET_WEEKLY_HOURS_UNDER_TARGET") {
     return "Akses dikunci karena jam kerja Riset mingguan belum memenuhi target.";
   }
   if (reason === "PICKET_SUBMISSION_INVALID") {
     return "Anda telah melakukan kegiatan piket yang tidak sesuai dengan tugas anda, mohon hubungi ke admin untuk melepas block.";
+  }
+  if (reason === "PICKET_SUBMISSION_MISSING") {
+    return "Akses dikunci karena Anda belum melakukan piket atau belum mengirim bukti piket dari jadwal sebelumnya.";
   }
 
   return `Akun Anda dikunci karena terdeteksi tidak hadir pada ${

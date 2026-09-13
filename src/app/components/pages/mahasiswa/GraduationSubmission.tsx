@@ -405,7 +405,11 @@ export default function GraduationSubmission() {
   const canSaveDraft = projects.length > 0 && !reviewLocked && !savingDraft && !hasInvalidFilledUrl;
   const canSubmit = completion.complete && !submitting && projects.length > 0 && !reviewLocked;
   const canBecomeAlumni = graduationAllowed && !becomingAlumni;
-  const submitLabel = submissionStatus === "Revisi" ? "Kirim Ulang Berkas Kelulusan" : "Kirim Berkas Kelulusan";
+  const submitLabel = submissionStatus === "Revisi"
+    ? "Kirim Ulang Berkas Kelulusan"
+    : submissionStatus === "Dikirim"
+      ? "Perbarui Berkas Kelulusan"
+      : "Kirim Berkas Kelulusan";
 
   useEffect(() => {
     const load = async () => {
@@ -635,6 +639,15 @@ export default function GraduationSubmission() {
           </div>
         )}
 
+        {submissionStatus === "Dikirim" && (
+          <div className="rounded-[16px] border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800 flex items-center justify-between">
+            <span>Berkas kelulusan sudah berhasil dikirim dan sedang menunggu peninjauan/ACC dari admin lab.</span>
+            <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-black uppercase text-blue-700">
+              Menunggu Review
+            </span>
+          </div>
+        )}
+
         {submissionStatus === "Valid" && studentStatus !== "Alumni" && !graduationAllowed && (
           <div className="rounded-[16px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold text-sky-800">
             Semua link sudah ACC. Tunggu admin memberi izin lulus agar tombol Jadi Alumni STAS-RG aktif.
@@ -791,7 +804,7 @@ export default function GraduationSubmission() {
           </button>
         )}
 
-        {!reviewLocked && (
+        {!reviewLocked && projects.length > 0 && (
           <button
             type="button"
             onClick={handleSubmit}

@@ -622,8 +622,8 @@ if (!isOpen) return null;
                   <div>
                     <p className="text-[13px] font-bold text-foreground mb-1.5">Tipe menentukan peran mahasiswa di lab.</p>
                     <ul className="list-disc pl-4 text-xs text-foreground space-y-1.5 marker:text-emerald-500">
-                      <li><strong>Magang:</strong> Mahasiswa memiliki <strong>1 proyek utama</strong> (Magang) dan dapat mengambil proyek riset sebagai proyek tambahan.</li>
-                      <li><strong>Riset:</strong> Mahasiswa memiliki <strong>1 proyek utama</strong> (Riset).</li>
+                      <li><strong>Magang:</strong> Mahasiswa memiliki <strong>1 proyek utama (Magang)</strong> dan dapat mengambil proyek riset sebagai proyek tambahan.</li>
+                      <li><strong>Riset:</strong> Mahasiswa memiliki <strong>1 proyek utama (Riset)</strong> dan dapat mengambil proyek riset lainnya sebagai proyek tambahan.</li>
                     </ul>
                   </div>
                 </div>
@@ -760,7 +760,7 @@ if (!isOpen) return null;
                   )}
                 </div>
 
-                {form.tipe === "Magang" && (
+                {selectedRisetOptions.length > 0 && (
                   <div className="pt-2 border-t border-dashed border-border mt-6">
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-[13px] font-black text-foreground">Proyek Tambahan (Opsional)</label>
@@ -776,7 +776,7 @@ if (!isOpen) return null;
                       </button>
                     </div>
                     <p className="mb-4 text-xs font-medium text-muted-foreground">
-                      Hanya untuk mahasiswa dengan tipe Magang. Proyek tambahan di sini adalah proyek Riset.
+                      Proyek riset tambahan untuk mahasiswa tipe Riset maupun Magang.
                     </p>
 
                     <div className="space-y-3">
@@ -910,8 +910,8 @@ if (!isOpen) return null;
                         <span className="font-medium text-blue-800">Peran</span>
                         <span className="font-medium text-blue-900">
                           {form.tipe === "Magang" 
-                            ? `1 Proyek Utama (Magang)${selectedRisetOptions.length > 1 ? ` + ${selectedRisetOptions.length - 1} Proyek Riset (Tambahan)` : ' + Proyek Riset (Tambahan)'}`
-                            : "1 Proyek Utama (Riset)"
+                            ? `1 Proyek Utama (Magang)${selectedRisetOptions.length > 1 ? ` + ${selectedRisetOptions.length - 1} Proyek Riset (Tambahan)` : ''}`
+                            : `1 Proyek Utama (Riset)${selectedRisetOptions.length > 1 ? ` + ${selectedRisetOptions.length - 1} Proyek Riset (Tambahan)` : ''}`
                           }
                         </span>
                       </div>

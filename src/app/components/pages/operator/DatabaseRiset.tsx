@@ -783,6 +783,13 @@ export default function DatabaseRiset() {
                             <p className="text-[10px] font-medium text-muted-foreground leading-tight mt-0.5">Mahasiswa riset pada proyek utamanya</p>
                           </div>
                         </div>
+                        <div className="flex gap-2">
+                          <div className="w-2 h-2 rounded-full bg-purple-500 mt-1 shrink-0" />
+                          <div>
+                            <p className="text-[11px] font-black text-foreground">Riset - Tambahan</p>
+                            <p className="text-[10px] font-medium text-muted-foreground leading-tight mt-0.5">Mahasiswa riset pada proyek riset (tambahan)</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -834,11 +841,14 @@ export default function DatabaseRiset() {
                                 {group.members.map((member: any, i: number) => {
                                   const isMagangUtama = member.tipe === "Magang" && member.peranDalamRiset === "Proyek Utama";
                                   const isMagangTambahan = member.tipe === "Magang" && member.peranDalamRiset === "Proyek Tambahan";
+                                  const isRisetTambahan = member.tipe === "Riset" && member.peranDalamRiset === "Proyek Tambahan";
                                   const roleColor = isMagangUtama ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
                                                     isMagangTambahan ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                                    isRisetTambahan ? "bg-purple-50 text-purple-700 border-purple-200" :
                                                     "bg-blue-50 text-blue-700 border-blue-200";
                                   const dotColor = isMagangUtama ? "bg-emerald-500" :
                                                    isMagangTambahan ? "bg-amber-500" :
+                                                   isRisetTambahan ? "bg-purple-500" :
                                                    "bg-blue-500";
                                   const tipeColor = member.tipe === "Magang" ? "text-emerald-600" : "text-blue-600";
                                   const isLastInGroup = i === group.members.length - 1;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { OperatorLayout } from "../../templates/OperatorLayout";
 import {
@@ -862,10 +862,36 @@ export default function OperatorDashboard() {
   const hadirHariIniMhs = students.filter((item) => presentIdSet.has(String(item.id)));
   const onsitePresentCount = hadirHariIniMhs.filter((item) => getAttendanceModeForStudent(item.id) !== "wfh").length;
   const wfhPresentCount = hadirHariIniMhs.filter((item) => getAttendanceModeForStudent(item.id) === "wfh").length;
+  const isDailyAttendanceLock = (lock?: StudentAccessLock | null) =>
+    String(lock?.reason || "") === "ATTENDANCE_ABSENT";
+  const isRisetWeeklyHoursLock = (lock?: StudentAccessLock | null) =>
+    String(lock?.reason || "") === "RISET_WEEKLY_HOURS_UNDER_TARGET";
+  const visibleAccessLocks = isHolidayAttendanceDay
+    ? accessLocks.filter((lock) => !isDailyAttendanceLock(lock))
+    : accessLocks;
+
+  const uniqueAccessLocks = useMemo(() => {
+    const studentMap = new Map<string, StudentAccessLock>();
+    for (const lock of visibleAccessLocks) {
+      const studentKey = String(lock.studentId || lock.id);
+      if (!studentMap.has(studentKey)) {
+        studentMap.set(studentKey, lock);
+      } else {
+        const existing = studentMap.get(studentKey)!;
+        const existingTime = existing.lockedAt ? new Date(existing.lockedAt).getTime() : 0;
+        const currentTime = lock.lockedAt ? new Date(lock.lockedAt).getTime() : 0;
+        if (currentTime > existingTime) {
+          studentMap.set(studentKey, lock);
+        }
+      }
+    }
+    return Array.from(studentMap.values());
+  }, [visibleAccessLocks]);
+
   const getStudentById = (studentId: string) =>
     students.find((item) => String(item.id) === String(studentId));
   const getAccessLockForStudent = (studentId: string) =>
-    visibleAccessLocks.find((item) => String(item.studentId) === String(studentId));
+    uniqueAccessLocks.find((item) => String(item.studentId) === String(studentId));
   const getStudentTypeLabel = (studentId: string, fallbackType?: string | null) =>
     getStudentById(studentId)?.tipe || fallbackType || getAccessLockForStudent(studentId)?.studentType || "Mahasiswa";
   const isMagangStudent = (studentId: string, fallbackType?: string | null) =>
@@ -896,14 +922,8 @@ export default function OperatorDashboard() {
       minimumHours: risetWeeklyMinimumHours,
     })
   );
-  const isDailyAttendanceLock = (lock?: StudentAccessLock | null) =>
-    String(lock?.reason || "") === "ATTENDANCE_ABSENT";
-  const isRisetWeeklyHoursLock = (lock?: StudentAccessLock | null) =>
-    String(lock?.reason || "") === "RISET_WEEKLY_HOURS_UNDER_TARGET";
-  const visibleAccessLocks = isHolidayAttendanceDay
-    ? accessLocks.filter((lock) => !isDailyAttendanceLock(lock))
-    : accessLocks;
-  const lockedAbsentMhs: AttendanceAbsentItem[] = visibleAccessLocks
+
+  const lockedAbsentMhs: AttendanceAbsentItem[] = uniqueAccessLocks
     .filter((lock) => isDailyAttendanceLock(lock) && !isRisetStudent(lock.studentId, lock.studentType))
     .map((lock) => ({
       id: lock.id || `lock-${lock.studentId}`,
@@ -976,7 +996,7 @@ export default function OperatorDashboard() {
   const weeklyPicketPeriodLabel = weeklyPicketPeriod.start && weeklyPicketPeriod.end
     ? `${formatDateYmd(weeklyPicketPeriod.start)} - ${formatDateYmd(weeklyPicketPeriod.end)}`
     : "Minggu berjalan";
-  const filteredAccessLocks = visibleAccessLocks.filter((lock) =>
+  const filteredAccessLocks = uniqueAccessLocks.filter((lock) =>
     matchesSearchQuery(
       [
         lock.studentName,
@@ -1352,10 +1372,10 @@ export default function OperatorDashboard() {
             <div className="px-4 py-3 border-b border-rose-200 bg-rose-50/60 flex items-center justify-between gap-3">
               <h3 className="text-xs font-black text-foreground flex min-w-0 flex-wrap items-center gap-2">
                 <Lock size={13} className="text-rose-700 shrink-0" /> Akses Ditangguhkan
-                <span className="bg-rose-700 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{accessLockSearch.trim() ? `${filteredAccessLocks.length}/${visibleAccessLocks.length}` : visibleAccessLocks.length}</span>
+                <span className="bg-rose-700 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">{accessLockSearch.trim() ? `${filteredAccessLocks.length}/${uniqueAccessLocks.length}` : uniqueAccessLocks.length}</span>
               </h3>
             </div>
-            {visibleAccessLocks.length === 0 ? (
+            {uniqueAccessLocks.length === 0 ? (
               <div className="px-4 py-8 text-center">
                 <p className="text-xs font-black text-foreground">Tidak ada akses ditangguhkan</p>
                 <p className="text-[10px] text-muted-foreground mt-1">Semua mahasiswa memiliki akses sistem yang aktif.</p>
