@@ -335,3 +335,91 @@ test("20. GitHub App unconfigured state remains supported and does not crash", (
   const unconfiguredEmpty = normalizeGitHubConfigStatus(null);
   assert.equal(unconfiguredEmpty.configured, false);
 });
+
+test("21. SharedBoardView.tsx removes legacy placeholder and integrates repository API", () => {
+  const rootDir = process.cwd();
+  const boardPath = path.join(rootDir, "src/app/components/organisms/SharedBoardView.tsx");
+  const content = fs.readFileSync(boardPath, "utf-8");
+
+  assert.ok(
+    !content.includes("Data repository belum terintegrasi dengan API"),
+    "SharedBoardView.tsx must NOT contain the legacy placeholder text"
+  );
+  assert.ok(
+    content.includes("/research/${activeId}/repositories"),
+    "SharedBoardView.tsx must query /research/${activeId}/repositories"
+  );
+  assert.ok(
+    content.includes("Belum ada repository GitHub yang terhubung ke project ini."),
+    "SharedBoardView.tsx must render clean empty state message"
+  );
+  assert.ok(
+    content.includes("Gagal memuat repository project."),
+    "SharedBoardView.tsx must render error state when API fails"
+  );
+  assert.ok(
+    content.includes("Memuat repository project..."),
+    "SharedBoardView.tsx must render loading state"
+  );
+});
+
+test("22. Progress Board repository summary renders multiple repositories, active/inactive badges, and links", () => {
+  const rootDir = process.cwd();
+  const boardPath = path.join(rootDir, "src/app/components/organisms/SharedBoardView.tsx");
+  const content = fs.readFileSync(boardPath, "utf-8");
+
+  assert.ok(
+    content.includes("repo.fullName"),
+    "SharedBoardView must render repo.fullName"
+  );
+  assert.ok(
+    content.includes("Buka GitHub"),
+    "SharedBoardView must render 'Buka GitHub' action"
+  );
+  assert.ok(
+    content.includes("target=\"_blank\"") && content.includes("rel=\"noopener noreferrer\""),
+    "External GitHub link must have target='_blank' and rel='noopener noreferrer'"
+  );
+  assert.ok(
+    content.includes("repo.isActive ? \"Aktif\" : \"Nonaktif\""),
+    "SharedBoardView must clearly distinguish active and inactive repositories"
+  );
+  assert.ok(
+    content.includes("Default branch:"),
+    "SharedBoardView must display default branch"
+  );
+});
+
+test("23. normalizeGitHubRepository correctly handles multiple repositories and active/inactive states", () => {
+  const rawRepos = [
+    {
+      id: "repo-1",
+      project_id: "PROJ-1",
+      github_owner: "HMNTR",
+      github_repo: "STAS-RG_MS_FE",
+      default_branch: "main",
+      is_active: true,
+      division_id: null,
+    },
+    {
+      id: "repo-2",
+      project_id: "PROJ-1",
+      github_owner: "HMNTR",
+      github_repo: "STAS-RG_MS_BE",
+      default_branch: "develop",
+      is_active: false,
+      division_id: "div-backend",
+    }
+  ];
+
+  const normalized = rawRepos.map(normalizeGitHubRepository);
+  assert.equal(normalized.length, 2);
+  assert.equal(normalized[0].fullName, "HMNTR/STAS-RG_MS_FE");
+  assert.equal(normalized[0].isActive, true);
+  assert.equal(normalized[0].defaultBranch, "main");
+
+  assert.equal(normalized[1].fullName, "HMNTR/STAS-RG_MS_BE");
+  assert.equal(normalized[1].isActive, false);
+  assert.equal(normalized[1].defaultBranch, "develop");
+  assert.equal(normalized[1].divisionId, "div-backend");
+});
