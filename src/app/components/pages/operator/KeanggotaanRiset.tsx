@@ -2,7 +2,16 @@ import React, { useState } from "react";
 import { OperatorLayout } from "../../templates/OperatorLayout";
 import { Search, Plus, X, Trash2, Pencil, Users, CheckCheck } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../../lib/api";
-import { getResearchRoleOptions, MAHASISWA_LEADER_ROLE, normalizeResearchRoleForMemberType } from "../../../lib/researchRoles";
+import {
+  getResearchRoleOptions,
+  MAHASISWA_LEADER_ROLE,
+  normalizeResearchRoleForMemberType,
+  getCombinedMemberRoles,
+  loadStoredDivisionRoles,
+  type DivisionRole
+} from "../../../lib/researchRoles";
+
+
 
 const PERAN_COLOR: Record<string, string> = {
   "Ketua": "bg-[#F8F5FF] text-[#6C47FF] border border-[#D6CAFF]",
@@ -31,8 +40,15 @@ export default function KeanggotaanRiset() {
   const [addPersonSearch, setAddPersonSearch] = useState("");
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
   const [editMember, setEditMember] = useState<string | null>(null);
+
   const [editRole, setEditRole] = useState("");
+  const [divisions, setDivisions] = useState<Array<any>>([]);
+  const [divisionRolesMap, setDivisionRolesMap] = useState<Record<string, DivisionRole[]>>({});
+  const [editDivisionId, setEditDivisionId] = useState<string>("");
+  const [customRoleInput, setCustomRoleInput] = useState<string>("");
+  const [isCustomRole, setIsCustomRole] = useState(false);
   const [error, setError] = useState("");
+
 
   React.useEffect(() => {
     const loadAll = async () => {
@@ -61,10 +77,20 @@ export default function KeanggotaanRiset() {
     const loadMembers = async () => {
       if (!selectedRiset) return;
       try {
-        const [members, requests] = await Promise.all([
+        const [members, requests, divs] = await Promise.all([
           apiGet<Array<any>>(`/research/${selectedRiset}/members`),
-          apiGet<Array<any>>(`/research/${selectedRiset}/join-requests`).catch(() => [])
+          apiGet<Array<any>>(`/research/${selectedRiset}/join-requests`).catch(() => []),
+          apiGet<Array<any>>(`/research/${selectedRiset}/divisions`).catch(() => [])
         ]);
+
+        const validDivs = divs || [];
+        setDivisions(validDivs);
+
+        const rolesMap: Record<string, DivisionRole[]> = {};
+        for (const d of validDivs) {
+          rolesMap[d.id] = loadStoredDivisionRoles(selectedRiset, d.id);
+        }
+        setDivisionRolesMap(rolesMap);
 
         setMembersMap((prev) => ({
           ...prev,
@@ -76,6 +102,7 @@ export default function KeanggotaanRiset() {
             color: member.member_type === "Dosen" ? "bg-blue-500 text-white" : "bg-[#8B6FFF] text-white",
             tipe: member.member_type,
             peran: member.peran || "Anggota",
+            divisionId: member.division_id || member.divisionId || null,
             bergabung: member.bergabung || "-",
             status: member.status || "Aktif"
           }))
@@ -109,17 +136,26 @@ export default function KeanggotaanRiset() {
 
   const openEditMemberRole = (member: any) => {
     setEditMember(member.memberId);
+    setEditDivisionId(member.divisionId || "");
     setEditRole(member.peran || getResearchRoleOptions(member.tipe)[0] || "Anggota");
+    setIsCustomRole(false);
+    setCustomRoleInput("");
   };
 
   const handleSaveMemberRole = async () => {
     if (!selectedRiset || !selectedEditMember) return;
 
     try {
-      const nextRole = normalizeResearchRoleForMemberType(editRole, selectedEditMember.tipe);
+      const chosenRole = isCustomRole ? customRoleInput.trim() : editRole;
+      if (!chosenRole) {
+        alert("Nama peran tidak boleh kosong.");
+        return;
+      }
+      const nextRole = normalizeResearchRoleForMemberType(chosenRole, selectedEditMember.tipe);
       await apiPatch(`/research/${selectedRiset}/members/${selectedEditMember.memberId}`, {
         memberType: selectedEditMember.tipe,
-        peran: nextRole
+        peran: nextRole,
+        divisionId: editDivisionId || null
       });
       const members = await apiGet<Array<any>>(`/research/${selectedRiset}/members`);
       setMembersMap((prev) => ({
@@ -132,16 +168,20 @@ export default function KeanggotaanRiset() {
           color: member.member_type === "Dosen" ? "bg-blue-500 text-white" : "bg-[#8B6FFF] text-white",
           tipe: member.member_type,
           peran: member.peran || "Anggota",
+          divisionId: member.division_id || member.divisionId || null,
           bergabung: member.bergabung || "-",
           status: member.status || "Aktif"
         }))
       }));
       setEditMember(null);
       setEditRole("");
+      setIsCustomRole(false);
+      setCustomRoleInput("");
     } catch (err: any) {
       setError(err?.message || "Gagal memperbarui peran anggota");
     }
   };
+
 
   const handleApproveJoinRequest = async (requestId: string) => {
     try {
@@ -472,14 +512,69 @@ export default function KeanggotaanRiset() {
       {/* Edit Role Modal */}
       {editMember && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setEditMember(null)}>
-          <div className="bg-white rounded-[20px] shadow-2xl w-full max-w-[360px] p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-[20px] shadow-2xl w-full max-w-[400px] p-6" onClick={e => e.stopPropagation()}>
             <h3 className="font-black text-foreground mb-4">Edit Peran Anggota</h3>
-            <div>
-              <label className="text-xs font-black text-foreground block mb-1.5">Peran Baru</label>
-              <select value={editRole} onChange={(e) => setEditRole(e.target.value)} className="w-full h-10 px-3 rounded-[10px] border border-border text-sm focus:outline-none cursor-pointer mb-4">
-                {[selectedEditMember?.peran, ...getResearchRoleOptions(selectedEditMember?.tipe)].filter((p, i, arr) => p && arr.indexOf(p) === i).map(p => <option key={p}>{p}</option>)}
-              </select>
+            
+            {/* Divisi Proyek */}
+            {divisions.length > 0 && (
+              <div className="mb-3">
+                <label className="text-xs font-black text-foreground block mb-1">Divisi Proyek (Opsional)</label>
+                <select
+                  value={editDivisionId}
+                  onChange={(e) => setEditDivisionId(e.target.value)}
+                  className="w-full h-10 px-3 rounded-[10px] border border-border text-xs focus:outline-none cursor-pointer bg-slate-50"
+                >
+                  <option value="">-- Tanpa / Semua Divisi --</option>
+                  {divisions.filter((d) => d.is_active !== false && d.isActive !== false).map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Peran / Role */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-black text-foreground block">Peran / Role</label>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomRole(!isCustomRole)}
+                  className="text-[11px] font-bold text-purple-600 hover:text-purple-800 underline"
+                >
+                  {isCustomRole ? "Pilih dari Daftar" : "+ Role Kustom"}
+                </button>
+              </div>
+
+              {isCustomRole ? (
+                <input
+                  type="text"
+                  placeholder="Ketik nama peran kustom..."
+                  value={customRoleInput}
+                  onChange={(e) => setCustomRoleInput(e.target.value)}
+                  className="w-full h-10 px-3 rounded-[10px] border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                />
+              ) : (
+                <select
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  className="w-full h-10 px-3 rounded-[10px] border border-border text-xs focus:outline-none cursor-pointer bg-white"
+                >
+                  {(() => {
+                    const selDiv = divisions.find((d) => d.id === editDivisionId);
+                    const roles = getCombinedMemberRoles(
+                      selectedEditMember?.tipe,
+                      editDivisionId,
+                      selDiv?.name,
+                      divisionRolesMap[editDivisionId]
+                    );
+                    const allOpts = Array.from(new Set([selectedEditMember?.peran, ...roles].filter(Boolean)));
+                    return allOpts.map((p) => <option key={p} value={p}>{p}</option>);
+                  })()}
+                </select>
+              )}
             </div>
+
             <div className="flex gap-3">
               <button onClick={() => setEditMember(null)} className="flex-1 h-10 border border-border rounded-[10px] text-sm font-bold text-muted-foreground hover:bg-slate-50 transition-colors">Batal</button>
               <button onClick={handleSaveMemberRole} className="flex-1 h-10 bg-amber-500 hover:bg-amber-600 text-white text-sm font-black rounded-[10px] transition-colors">Simpan</button>

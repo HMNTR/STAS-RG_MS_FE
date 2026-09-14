@@ -21,7 +21,9 @@ import {
   DOSEN_RESEARCH_ROLES,
   getResearchRoleOptions,
   MAHASISWA_RESEARCH_ROLES,
-  normalizeResearchRoleForMemberType
+  normalizeResearchRoleForMemberType,
+  getCombinedMemberRoles,
+  loadStoredDivisionRoles
 } from "../../lib/researchRoles";
 import {
   ProjectDivision,
@@ -3566,9 +3568,23 @@ export function SharedBoardView({
                             className="mt-0.5 w-full max-w-[180px] bg-transparent text-[10px] font-bold text-slate-500 outline-none cursor-pointer"
                             title="Ubah peran anggota"
                           >
-                            {[member.role, ...getResearchRoleOptions(member.memberType)].filter((role, index, roles) => role && roles.indexOf(role) === index).map((role) => (
-                              <option key={role} value={role}>{role}</option>
-                            ))}
+                            {(() => {
+                              const activeDiv = divisions.find((d) => d.id === selectedDivisionId);
+                              const divisionRoles = loadStoredDivisionRoles(
+                                activeId,
+                                selectedDivisionId !== "all" && selectedDivisionId !== "unassigned" ? selectedDivisionId : undefined
+                              );
+                              const combined = getCombinedMemberRoles(
+                                member.memberType,
+                                selectedDivisionId !== "all" && selectedDivisionId !== "unassigned" ? selectedDivisionId : null,
+                                activeDiv?.name,
+                                divisionRoles
+                              );
+                              const allOpts = Array.from(new Set([member.role, ...combined].filter(Boolean)));
+                              return allOpts.map((role) => (
+                                <option key={role} value={role}>{role}</option>
+                              ));
+                            })()}
                           </select>
                         </div>
                         <button
@@ -3711,8 +3727,18 @@ export function SharedBoardView({
                   {(() => {
                     const hasKetua = teamMembers.some(m => m.role.toLowerCase().includes("ketua"));
                     const selectedCandidate = availableCandidates.find(c => c.user_id === selectedCandidateId);
+                    const activeDiv = divisions.find((d) => d.id === selectedDivisionId);
+                    const divisionRoles = loadStoredDivisionRoles(
+                      activeId,
+                      selectedDivisionId !== "all" && selectedDivisionId !== "unassigned" ? selectedDivisionId : undefined
+                    );
                     const roleOptions = selectedCandidate
-                      ? getResearchRoleOptions(selectedCandidate.member_type)
+                      ? getCombinedMemberRoles(
+                          selectedCandidate.member_type,
+                          selectedDivisionId !== "all" && selectedDivisionId !== "unassigned" ? selectedDivisionId : null,
+                          activeDiv?.name,
+                          divisionRoles
+                        )
                       : Array.from(new Set([...MAHASISWA_RESEARCH_ROLES, ...DOSEN_RESEARCH_ROLES]));
                     
                     const filteredRoles = roleOptions.filter(role => {

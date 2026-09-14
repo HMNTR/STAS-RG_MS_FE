@@ -3,7 +3,7 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
-const localApiTarget = 'http://localhost:3000'
+const localApiTarget = 'http://localhost:3333'
 
 export default defineConfig({
   plugins: [

@@ -30,6 +30,15 @@ import {
   normalizeDivisionItem,
   END_SPRINT_CONFIRMATION_MESSAGE
 } from "../../../lib/scrum";
+import {
+  DivisionRole,
+  normalizeDivisionRole,
+  validateDivisionRoleName,
+  loadStoredDivisionRoles,
+  saveStoredDivisionRoles,
+  DEFAULT_DIVISION_ROLES
+} from "../../../lib/researchRoles";
+
 
 const FIBONACCI_POINTS = [1, 2, 3, 5, 8, 13, 21];
 
@@ -108,6 +117,14 @@ export default function ScrumPlanning() {
   const [editingDivisionName, setEditingDivisionName] = useState("");
   const [divisionActionLoading, setDivisionActionLoading] = useState(false);
 
+  // Division Roles states
+  const [divisionRolesMap, setDivisionRolesMap] = useState<Record<string, DivisionRole[]>>({});
+  const [expandedDivisionRoles, setExpandedDivisionRoles] = useState<Record<string, boolean>>({});
+  const [newRoleInputs, setNewRoleInputs] = useState<Record<string, string>>({});
+  const [roleError, setRoleError] = useState<Record<string, string>>({});
+  const [roleActionLoading, setRoleActionLoading] = useState(false);
+
+
   // Load Projects
   useEffect(() => {
     const loadProjects = async () => {
@@ -146,7 +163,9 @@ export default function ScrumPlanning() {
 
       setSprints(sprintsData || []);
       setTasks(boardData?.tasks || []);
-      setDivisions((divisionsData || []).map(normalizeDivisionItem));
+      const normalizedDivs = (divisionsData || []).map(normalizeDivisionItem);
+      setDivisions(normalizedDivs);
+      loadRolesForDivisions(projectId, normalizedDivs);
       setMembers(
         (membersData || []).map((m: any) => ({
           userId: m.user_id || m.userId,
@@ -245,6 +264,137 @@ export default function ScrumPlanning() {
       setDivisionActionLoading(false);
     }
   };
+
+  const loadRolesForDivisions = async (projectId: string, divList: ProjectDivision[]) => {
+    const rolesMap: Record<string, DivisionRole[]> = {};
+    for (const div of divList) {
+      try {
+        const remote = await apiGet<any[]>(`/research/${projectId}/divisions/${div.id}/roles`).catch(() => null);
+        if (Array.isArray(remote) && remote.length > 0) {
+          rolesMap[div.id] = remote.map(normalizeDivisionRole);
+        } else {
+          rolesMap[div.id] = loadStoredDivisionRoles(projectId, div.id);
+        }
+      } catch {
+        rolesMap[div.id] = loadStoredDivisionRoles(projectId, div.id);
+      }
+    }
+    setDivisionRolesMap(rolesMap);
+  };
+
+  const handleAddDivisionRole = async (divisionId: string, divisionName: string) => {
+    if (!activeProject?.id) return;
+    const inputVal = (newRoleInputs[divisionId] || "").trim();
+    const existing = divisionRolesMap[divisionId] || [];
+
+    const validation = validateDivisionRoleName(inputVal, existing);
+    if (!validation.valid) {
+      setRoleError((prev) => ({ ...prev, [divisionId]: validation.error || "Nama role tidak valid." }));
+      return;
+    }
+
+    setRoleActionLoading(true);
+    setRoleError((prev) => ({ ...prev, [divisionId]: "" }));
+    try {
+      let createdRole: DivisionRole | null = null;
+      try {
+        const res = await apiPost<any>(`/research/${activeProject.id}/divisions/${divisionId}/roles`, {
+          name: inputVal
+        });
+        if (res) {
+          createdRole = normalizeDivisionRole(res);
+        }
+      } catch {
+        // Fallback to local storage
+      }
+
+      if (!createdRole) {
+        createdRole = {
+          id: `drole-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          divisionId,
+          projectId: activeProject.id,
+          name: inputVal,
+          isActive: true,
+          sortOrder: existing.length + 1
+        };
+      }
+
+      const updated = [...existing, createdRole];
+      saveStoredDivisionRoles(activeProject.id, divisionId, updated);
+      setDivisionRolesMap((prev) => ({ ...prev, [divisionId]: updated }));
+      setNewRoleInputs((prev) => ({ ...prev, [divisionId]: "" }));
+    } catch (err: any) {
+      setRoleError((prev) => ({ ...prev, [divisionId]: err?.message || "Gagal menambah role." }));
+    } finally {
+      setRoleActionLoading(false);
+    }
+  };
+
+  const handleDeleteDivisionRole = async (divisionId: string, roleId: string, roleName: string) => {
+    if (!activeProject?.id) return;
+    if (!confirm(`Hapus role "${roleName}" dari divisi ini?`)) return;
+
+    setRoleActionLoading(true);
+    try {
+      try {
+        await apiDelete(`/research/${activeProject.id}/divisions/${divisionId}/roles/${roleId}`);
+      } catch {
+        // Fallback to local storage update
+      }
+
+      const existing = divisionRolesMap[divisionId] || [];
+      const updated = existing.filter((r) => r.id !== roleId);
+      saveStoredDivisionRoles(activeProject.id, divisionId, updated);
+      setDivisionRolesMap((prev) => ({ ...prev, [divisionId]: updated }));
+    } catch (err: any) {
+      alert(err?.message || "Gagal menghapus role.");
+    } finally {
+      setRoleActionLoading(false);
+    }
+  };
+
+  const handleApplyRecommendedRoles = (divisionId: string, divisionName: string) => {
+    if (!activeProject?.id) return;
+    const key = divisionName.trim().toLowerCase();
+    let presets: string[] = [];
+    for (const [prefix, roles] of Object.entries(DEFAULT_DIVISION_ROLES)) {
+      if (key.includes(prefix)) {
+        presets = roles;
+        break;
+      }
+    }
+
+    if (presets.length === 0) {
+      alert("Tidak ditemukan preset rekomendasi untuk divisi ini.");
+      return;
+    }
+
+    const existing = divisionRolesMap[divisionId] || [];
+    const newItems: DivisionRole[] = [];
+    presets.forEach((roleName) => {
+      const exists = existing.some((r) => r.name.toLowerCase() === roleName.toLowerCase());
+      if (!exists) {
+        newItems.push({
+          id: `drole-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          divisionId,
+          projectId: activeProject.id,
+          name: roleName,
+          isActive: true,
+          sortOrder: existing.length + newItems.length + 1
+        });
+      }
+    });
+
+    if (newItems.length === 0) {
+      alert("Semua role rekomendasi sudah ada di divisi ini.");
+      return;
+    }
+
+    const updated = [...existing, ...newItems];
+    saveStoredDivisionRoles(activeProject.id, divisionId, updated);
+    setDivisionRolesMap((prev) => ({ ...prev, [divisionId]: updated }));
+  };
+
 
   // Sprint Actions
   const handleCreateSprint = async (e: React.FormEvent) => {
@@ -1305,72 +1455,183 @@ export default function ScrumPlanning() {
                             </button>
                           </div>
                         ) : (
-                          <>
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <span
-                                className={`w-2 h-2 rounded-full shrink-0 ${
-                                  div.isActive !== false ? "bg-emerald-500" : "bg-slate-300"
-                                }`}
-                              />
-                              <span
-                                className={`text-xs font-bold truncate ${
-                                  div.isActive === false ? "text-muted-foreground line-through" : "text-foreground"
-                                }`}
-                              >
-                                {div.name}
-                              </span>
-                              {div.isActive === false && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.2 bg-slate-200 text-slate-600 rounded">
-                                  Nonaktif
+                          <div className="flex flex-col gap-2.5 w-full">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span
+                                  className={`w-2 h-2 rounded-full shrink-0 ${
+                                    div.isActive !== false ? "bg-emerald-500" : "bg-slate-300"
+                                  }`}
+                                />
+                                <span
+                                  className={`text-xs font-bold truncate ${
+                                    div.isActive === false ? "text-muted-foreground line-through" : "text-foreground"
+                                  }`}
+                                >
+                                  {div.name}
                                 </span>
-                              )}
+                                {div.isActive === false && (
+                                  <span className="text-[10px] font-bold px-1.5 py-0.2 bg-slate-200 text-slate-600 rounded">
+                                    Nonaktif
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                {/* Toggle expand roles */}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedDivisionRoles((prev) => ({
+                                      ...prev,
+                                      [div.id]: !prev[div.id]
+                                    }))
+                                  }
+                                  className={`px-2 py-1 text-[11px] font-bold rounded-lg border flex items-center gap-1 transition-colors ${
+                                    expandedDivisionRoles[div.id]
+                                      ? "bg-purple-100 text-purple-800 border-purple-300"
+                                      : "bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                                  }`}
+                                  title="Kelola role spesifik divisi ini"
+                                >
+                                  <span>Role ({(divisionRolesMap[div.id] || []).length})</span>
+                                  {expandedDivisionRoles[div.id] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                </button>
+
+                                {/* Reorder Up */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleReorderDivision(div.id, "up")}
+                                  disabled={index === 0 || divisionActionLoading}
+                                  className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground disabled:opacity-30 rounded-lg transition-colors"
+                                  title="Pindah ke atas"
+                                >
+                                  <ChevronUp size={14} />
+                                </button>
+                                {/* Reorder Down */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleReorderDivision(div.id, "down")}
+                                  disabled={index === divisions.length - 1 || divisionActionLoading}
+                                  className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground disabled:opacity-30 rounded-lg transition-colors"
+                                  title="Pindah ke bawah"
+                                >
+                                  <ChevronDown size={14} />
+                                </button>
+                                {/* Edit name */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingDivisionId(div.id);
+                                    setEditingDivisionName(div.name);
+                                  }}
+                                  className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                                  title="Ubah Nama"
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                {/* Toggle active */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDivisionStatus(div.id, div.isActive !== false)}
+                                  disabled={divisionActionLoading}
+                                  className={`px-2 py-1 text-[10px] font-black rounded-lg border transition-colors ${
+                                    div.isActive !== false
+                                      ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200"
+                                      : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                                  }`}
+                                  title={div.isActive !== false ? "Nonaktifkan divisi" : "Aktifkan divisi"}
+                                >
+                                  {div.isActive !== false ? "Nonaktifkan" : "Aktifkan"}
+                                </button>
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0">
-                              {/* Reorder Up */}
-                              <button
-                                onClick={() => handleReorderDivision(div.id, "up")}
-                                disabled={index === 0 || divisionActionLoading}
-                                className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground disabled:opacity-30 rounded-lg transition-colors"
-                                title="Pindah ke atas"
-                              >
-                                <ChevronUp size={14} />
-                              </button>
-                              {/* Reorder Down */}
-                              <button
-                                onClick={() => handleReorderDivision(div.id, "down")}
-                                disabled={index === divisions.length - 1 || divisionActionLoading}
-                                className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground disabled:opacity-30 rounded-lg transition-colors"
-                                title="Pindah ke bawah"
-                              >
-                                <ChevronDown size={14} />
-                              </button>
-                              {/* Edit name */}
-                              <button
-                                onClick={() => {
-                                  setEditingDivisionId(div.id);
-                                  setEditingDivisionName(div.name);
-                                }}
-                                className="p-1.5 hover:bg-white text-muted-foreground hover:text-foreground rounded-lg transition-colors"
-                                title="Ubah Nama"
-                              >
-                                <Pencil size={13} />
-                              </button>
-                              {/* Toggle active */}
-                              <button
-                                onClick={() => handleToggleDivisionStatus(div.id, div.isActive !== false)}
-                                disabled={divisionActionLoading}
-                                className={`px-2 py-1 text-[10px] font-black rounded-lg border transition-colors ${
-                                  div.isActive !== false
-                                    ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200"
-                                    : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
-                                }`}
-                                title={div.isActive !== false ? "Nonaktifkan divisi" : "Aktifkan divisi"}
-                              >
-                                {div.isActive !== false ? "Nonaktifkan" : "Aktifkan"}
-                              </button>
-                            </div>
-                          </>
+                            {/* Expandable Section: Role Divisi */}
+                            {expandedDivisionRoles[div.id] && (
+                              <div className="mt-1 pt-2.5 border-t border-slate-200 flex flex-col gap-2 bg-white/70 p-2.5 rounded-lg border border-purple-100">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[10px] font-black text-purple-950 uppercase tracking-wider">
+                                    Role / Posisi Divisi ({div.name})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyRecommendedRoles(div.id, div.name)}
+                                    className="text-[10px] font-bold text-purple-700 hover:text-purple-900 hover:underline flex items-center gap-0.5"
+                                  >
+                                    <Sparkles size={11} />
+                                    <span>+ Saran Role</span>
+                                  </button>
+                                </div>
+
+                                {/* Daftar Chip Role */}
+                                <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+                                  {(divisionRolesMap[div.id] || []).length === 0 ? (
+                                    <span className="text-[11px] text-muted-foreground italic">
+                                      Belum ada role divisi khusus. Anggota akan menggunakan opsi standar.
+                                    </span>
+                                  ) : (
+                                    (divisionRolesMap[div.id] || []).map((r) => (
+                                      <span
+                                        key={r.id}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-md text-[11px] font-medium"
+                                      >
+                                        <span>{r.name}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteDivisionRole(div.id, r.id, r.name)}
+                                          disabled={roleActionLoading}
+                                          className="text-purple-400 hover:text-rose-600 transition-colors ml-0.5"
+                                          title={`Hapus role ${r.name}`}
+                                        >
+                                          <X size={11} />
+                                        </button>
+                                      </span>
+                                    ))
+                                  )}
+                                </div>
+
+                                {/* Form tambah role divisi */}
+                                <div className="flex gap-2 items-center mt-0.5">
+                                  <input
+                                    type="text"
+                                    placeholder={`Tambah role ${div.name} (cth: Frontend Lead)...`}
+                                    value={newRoleInputs[div.id] || ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setNewRoleInputs((prev) => ({ ...prev, [div.id]: val }));
+                                      if (roleError[div.id]) {
+                                        setRoleError((prev) => ({ ...prev, [div.id]: "" }));
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        handleAddDivisionRole(div.id, div.name);
+                                      }
+                                    }}
+                                    className="flex-1 h-7 px-2 text-xs bg-white border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddDivisionRole(div.id, div.name)}
+                                    disabled={!newRoleInputs[div.id]?.trim() || roleActionLoading}
+                                    className="px-2.5 h-7 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1 shrink-0"
+                                  >
+                                    <Plus size={12} />
+                                    <span>Tambah Role</span>
+                                  </button>
+                                </div>
+
+                                {roleError[div.id] && (
+                                  <p className="text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                                    <AlertCircle size={12} />
+                                    <span>{roleError[div.id]}</span>
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
