@@ -10,7 +10,8 @@ import {
   UploadCloud, Download, Send, FileText,
   Image as ImageIcon, Folder, Plus, Trash2, MessageSquare,
   Paperclip, GitBranch, ExternalLink, Link as LinkIcon, Search,
-  Kanban, Users as UsersIcon, GitCommit, GitPullRequest, Copy, CheckCircle2, RefreshCw
+  Kanban, Users as UsersIcon, GitCommit, GitPullRequest, Copy, CheckCircle2, RefreshCw,
+  AlertCircle, Lock
 } from "lucide-react";
 import { useConfirmDialog } from "../molecules/ConfirmDialog";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getStoredUser } from "../../lib/api";
@@ -528,6 +529,9 @@ export function SharedBoardView({
   const [divisions, setDivisions] = useState<ProjectDivision[]>([]);
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>("all");
   const [onlyMyTasks, setOnlyMyTasks] = useState(false);
+  const [boardRepos, setBoardRepos] = useState<GitHubRepository[]>([]);
+  const [boardReposLoading, setBoardReposLoading] = useState<boolean>(false);
+  const [boardReposError, setBoardReposError] = useState<string>("");
   const projectIdsKey = projectIds.join("|");
 
   useEffect(() => {
@@ -560,6 +564,42 @@ export function SharedBoardView({
         setDivisions((list || []).map(normalizeDivisionItem));
       })
       .catch(() => setDivisions([]));
+  }, [activeId]);
+
+  useEffect(() => {
+    if (!activeId) {
+      setBoardRepos([]);
+      setBoardReposError("");
+      setBoardReposLoading(false);
+      return;
+    }
+    let mounted = true;
+    setBoardReposLoading(true);
+    setBoardReposError("");
+
+    apiGet<{ configured?: boolean; repositories?: any[] }>(`/research/${activeId}/repositories`)
+      .then((res) => {
+        if (!mounted) return;
+        const raw = Array.isArray(res?.repositories)
+          ? res.repositories
+          : Array.isArray(res)
+            ? res
+            : [];
+        setBoardRepos(raw.map(normalizeGitHubRepository));
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setBoardReposError("Gagal memuat repository project.");
+      })
+      .finally(() => {
+        if (mounted) {
+          setBoardReposLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, [activeId]);
 
   useEffect(() => {
@@ -2376,15 +2416,98 @@ export function SharedBoardView({
             )}
           </div>
 
-          {/* ──   Links ── */}
+          {/* ── Repository Section ── */}
           <div className="mt-2 flex flex-col gap-4">
             <div className="flex items-center gap-2">
               <GitBranch className="text-primary" size={20} />
               <h2 className="text-lg font-bold text-foreground">Repository</h2>
+              {boardRepos.length > 0 && (
+                <span className="text-xs font-bold text-muted-foreground bg-slate-100 px-2 py-0.5 rounded-full">
+                  {boardRepos.length}
+                </span>
+              )}
             </div>
-            <div className="bg-white rounded-[16px] border border-border/60 p-5 shadow-sm">
-              <p className="text-sm text-muted-foreground">Data repository belum terintegrasi dengan API.</p>
-            </div>
+
+            {boardReposLoading ? (
+              <div className="bg-white rounded-[16px] border border-border/60 p-5 shadow-sm flex items-center gap-2 text-muted-foreground text-sm">
+                <RefreshCw size={16} className="animate-spin text-primary" />
+                <span>Memuat repository project...</span>
+              </div>
+            ) : boardReposError ? (
+              <div className="bg-white rounded-[16px] border border-rose-200 bg-rose-50/40 p-4 shadow-sm text-sm text-rose-600 flex items-center gap-2">
+                <AlertCircle size={16} className="shrink-0" />
+                <span>{boardReposError}</span>
+              </div>
+            ) : boardRepos.length === 0 ? (
+              <div className="bg-white rounded-[16px] border border-border/60 p-5 shadow-sm text-center">
+                <p className="text-sm text-muted-foreground">Belum ada repository GitHub yang terhubung ke project ini.</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {boardRepos.map((repo) => {
+                  const div = divisions.find((d) => d.id === repo.divisionId);
+                  const divisionLabel = div?.name || "Lintas Divisi";
+                  const safeUrl = `https://github.com/${repo.owner}/${repo.repo}`;
+                  const isUrlValid = isValidGitHubUrl(safeUrl);
+
+                  return (
+                    <div
+                      key={repo.id}
+                      className="bg-white rounded-[16px] border border-border/60 p-4 shadow-sm hover:border-slate-300 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-foreground truncate">
+                            {repo.fullName}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              repo.isActive
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {repo.isActive ? "Aktif" : "Nonaktif"}
+                          </span>
+                          {repo.isPrivate && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 flex items-center gap-1">
+                              <Lock size={10} /> Private
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                          <span>
+                            Default branch:{" "}
+                            <code className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-mono">
+                              {repo.defaultBranch || "main"}
+                            </code>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Divisi: <strong className="text-foreground">{divisionLabel}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      {isUrlValid && (
+                        <div className="shrink-0 flex items-center">
+                          <a
+                            href={safeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-slate-50 hover:bg-slate-100 text-xs font-bold text-foreground transition-colors"
+                          >
+                            <ExternalLink size={13} />
+                            <span>Buka GitHub</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
 
