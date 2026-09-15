@@ -32,6 +32,7 @@ import {
   getDivisionTabs,
   normalizeDivisionItem
 } from "../../lib/scrum";
+import { getSprintTimingState } from "../../lib/sprintDuration";
 import {
   GitHubRepository,
   TaskRepositoryLink,
@@ -2099,21 +2100,35 @@ export function SharedBoardView({
           </div>
 
           {/* ── Sprint Status Banner & My Tasks Filter ── */}
-          {activeSprint ? (
+          {activeSprint ? (() => {
+            const timing = getSprintTimingState(activeSprint);
+            return (
             <div className="bg-white border border-purple-200 rounded-[16px] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
                   <Kanban size={20} />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-sm font-black text-foreground">{activeSprint.name}</h3>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-700 uppercase tracking-wider">
                       Sprint Aktif
                     </span>
                     <span className="text-xs font-black text-purple-700">⚡ {activeSprint.totalPoints} SP</span>
+                    {timing.isOverdue && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-200 animate-pulse">
+                        Melewati Jadwal ({timing.overdueDays} Hari)
+                      </span>
+                    )}
                   </div>
                   {activeSprint.goal && <p className="text-xs text-muted-foreground mt-0.5">{activeSprint.goal}</p>}
+                  {(activeSprint.startDate || activeSprint.endDate) && (
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground mt-1">
+                      <span>Periode: {timing.periodLabel}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="font-semibold text-slate-700">Durasi: {timing.durationLabel}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2130,7 +2145,8 @@ export function SharedBoardView({
                 </button>
               </div>
             </div>
-          ) : reviewSprint ? (
+            );
+          })() : reviewSprint ? (
             <div className="bg-amber-50 border border-amber-200 rounded-[16px] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">

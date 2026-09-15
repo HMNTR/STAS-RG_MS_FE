@@ -35,9 +35,14 @@ import {
   normalizeDivisionRole,
   validateDivisionRoleName,
   loadStoredDivisionRoles,
-  saveStoredDivisionRoles,
-  DEFAULT_DIVISION_ROLES
 } from "../../../lib/researchRoles";
+import {
+  SprintDurationPreset,
+  calculateSprintEndDate,
+  inferSprintDurationPreset,
+  validateSprintDates,
+  getSprintTimingState
+} from "../../../lib/sprintDuration";
 
 
 const FIBONACCI_POINTS = [1, 2, 3, 5, 8, 13, 21];
@@ -90,6 +95,9 @@ export default function ScrumPlanning() {
 
   // Modal states
   const [isSprintModalOpen, setIsSprintModalOpen] = useState(false);
+  const [editingSprintId, setEditingSprintId] = useState<string | null>(null);
+  const [sprintDurationPreset, setSprintDurationPreset] = useState<SprintDurationPreset>("2_weeks");
+  const [sprintDateError, setSprintDateError] = useState<string>("");
   const [sprintForm, setSprintForm] = useState({
     name: "",
     goal: "",
@@ -397,24 +405,101 @@ export default function ScrumPlanning() {
 
 
   // Sprint Actions
-  const handleCreateSprint = async (e: React.FormEvent) => {
+  const openCreateSprintModal = () => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const defaultPreset: SprintDurationPreset = "2_weeks";
+    const defaultEnd = calculateSprintEndDate(todayStr, defaultPreset);
+    setEditingSprintId(null);
+    setSprintDurationPreset(defaultPreset);
+    setSprintForm({
+      name: "",
+      goal: "",
+      startDate: todayStr,
+      endDate: defaultEnd
+    });
+    setSprintDateError("");
+    setIsSprintModalOpen(true);
+  };
+
+  const openEditSprintModal = (sprint: Sprint) => {
+    if (sprint.status !== "planning") return;
+    const start = sprint.startDate ? String(sprint.startDate).slice(0, 10) : "";
+    const end = sprint.endDate ? String(sprint.endDate).slice(0, 10) : "";
+    const inferred = inferSprintDurationPreset(start, end);
+    setEditingSprintId(sprint.id);
+    setSprintDurationPreset(inferred);
+    setSprintForm({
+      name: sprint.name || "",
+      goal: sprint.goal || "",
+      startDate: start,
+      endDate: end
+    });
+    setSprintDateError("");
+    setIsSprintModalOpen(true);
+  };
+
+  const handleStartDateChange = (newStart: string) => {
+    setSprintDateError("");
+    let newEnd = sprintForm.endDate;
+    if (sprintDurationPreset !== "custom" && newStart) {
+      newEnd = calculateSprintEndDate(newStart, sprintDurationPreset);
+    }
+    setSprintForm((prev) => ({
+      ...prev,
+      startDate: newStart,
+      endDate: newEnd
+    }));
+  };
+
+  const handleDurationPresetChange = (preset: SprintDurationPreset) => {
+    setSprintDurationPreset(preset);
+    setSprintDateError("");
+    if (preset !== "custom" && sprintForm.startDate) {
+      const newEnd = calculateSprintEndDate(sprintForm.startDate, preset);
+      setSprintForm((prev) => ({ ...prev, endDate: newEnd }));
+    }
+  };
+
+  const handleEndDateChange = (newEnd: string) => {
+    setSprintDateError("");
+    setSprintForm((prev) => ({ ...prev, endDate: newEnd }));
+  };
+
+  const handleSaveSprint = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeProject?.id || !sprintForm.name.trim()) return;
 
+    const validation = validateSprintDates(sprintForm.startDate || null, sprintForm.endDate || null);
+    if (!validation.valid) {
+      setSprintDateError(validation.error || "Rentang tanggal sprint tidak valid.");
+      return;
+    }
+
     try {
-      await apiPost(`/research/${activeProject.id}/sprints`, {
-        name: sprintForm.name.trim(),
-        goal: sprintForm.goal.trim() || null,
-        startDate: sprintForm.startDate || null,
-        endDate: sprintForm.endDate || null,
-        status: "planning"
-      });
+      if (editingSprintId) {
+        await apiPatch(`/research/${activeProject.id}/sprints/${editingSprintId}`, {
+          name: sprintForm.name.trim(),
+          goal: sprintForm.goal.trim() || null,
+          startDate: sprintForm.startDate || null,
+          endDate: sprintForm.endDate || null
+        });
+      } else {
+        await apiPost(`/research/${activeProject.id}/sprints`, {
+          name: sprintForm.name.trim(),
+          goal: sprintForm.goal.trim() || null,
+          startDate: sprintForm.startDate || null,
+          endDate: sprintForm.endDate || null,
+          status: "planning"
+        });
+      }
 
       setIsSprintModalOpen(false);
+      setEditingSprintId(null);
       setSprintForm({ name: "", goal: "", startDate: "", endDate: "" });
       await loadProjectData(activeProject.id);
     } catch (err: any) {
-      alert(err?.message || "Gagal membuat sprint.");
+      alert(err?.message || (editingSprintId ? "Gagal memperbarui sprint." : "Gagal membuat sprint."));
     }
   };
 
@@ -839,7 +924,7 @@ export default function ScrumPlanning() {
               </div>
 
               <button
-                onClick={() => setIsSprintModalOpen(true)}
+                onClick={openCreateSprintModal}
                 className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
               >
                 <Plus size={14} strokeWidth={3} />
@@ -856,7 +941,7 @@ export default function ScrumPlanning() {
                     Buat Sprint pertama untuk proyek riset ini, lalu masukkan tugas dari Product Backlog.
                   </p>
                   <button
-                    onClick={() => setIsSprintModalOpen(true)}
+                    onClick={openCreateSprintModal}
                     className="px-4 py-2 bg-primary text-white text-xs font-black rounded-xl"
                   >
                     + Buat Sprint Pertama
@@ -921,14 +1006,25 @@ export default function ScrumPlanning() {
                               Sprint sedang dalam tahap Review. Summary dan evaluasi Sprint perlu diselesaikan sebelum Sprint berikutnya dapat dimulai.
                             </p>
                           )}
-                          {(sprint.startDate || sprint.endDate) && (
-                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-1">
-                              <Calendar size={12} />
-                              <span>
-                                {sprint.startDate || "?"} s/d {sprint.endDate || "?"}
-                              </span>
-                            </div>
-                          )}
+                          {(sprint.startDate || sprint.endDate) && (() => {
+                            const timing = getSprintTimingState(sprint);
+                            return (
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground mt-1">
+                                <div className="flex items-center gap-1.5">
+                                  <Calendar size={12} />
+                                  <span>{timing.periodLabel}</span>
+                                </div>
+                                <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px]">
+                                  {timing.durationLabel}
+                                </span>
+                                {timing.isOverdue && (
+                                  <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 font-black text-[10px] border border-rose-200 animate-pulse">
+                                    Melewati Jadwal ({timing.overdueDays} Hari)
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         {/* Sprint Controls */}
@@ -970,6 +1066,16 @@ export default function ScrumPlanning() {
                             >
                               <FileText size={14} />
                               <span>Lihat Summary</span>
+                            </button>
+                          )}
+
+                          {isPlanning && (
+                            <button
+                              onClick={() => openEditSprintModal(sprint)}
+                              className="p-1.5 hover:bg-slate-100 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                              title="Edit sprint (durasi & jadwal)"
+                            >
+                              <Pencil size={15} />
                             </button>
                           )}
 
@@ -1115,9 +1221,11 @@ export default function ScrumPlanning() {
             className="bg-white rounded-[24px] shadow-2xl w-full max-w-md p-6 flex flex-col gap-4 border border-border"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-black text-foreground">Buat Sprint Baru</h3>
+            <h3 className="text-base font-black text-foreground">
+              {editingSprintId ? "Edit Sprint" : "Buat Sprint Baru"}
+            </h3>
 
-            <form onSubmit={handleCreateSprint} className="flex flex-col gap-3.5">
+            <form onSubmit={handleSaveSprint} className="flex flex-col gap-3.5">
               <div>
                 <label className="text-xs font-black text-foreground block mb-1">Nama Sprint</label>
                 <input
@@ -1140,26 +1248,81 @@ export default function ScrumPlanning() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-black text-foreground block mb-1">Tanggal Mulai</label>
-                  <input
-                    type="date"
-                    value={sprintForm.startDate}
-                    onChange={(e) => setSprintForm({ ...sprintForm, startDate: e.target.value })}
-                    className="w-full h-10 px-3 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-black text-foreground block mb-1">Tanggal Selesai</label>
-                  <input
-                    type="date"
-                    value={sprintForm.endDate}
-                    onChange={(e) => setSprintForm({ ...sprintForm, endDate: e.target.value })}
-                    className="w-full h-10 px-3 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
+              <div>
+                <label className="text-xs font-black text-foreground block mb-1">Tanggal Mulai</label>
+                <input
+                  type="date"
+                  value={sprintForm.startDate}
+                  onChange={(e) => handleStartDateChange(e.target.value)}
+                  className="w-full h-10 px-3 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black text-foreground block mb-1.5">Durasi Sprint</label>
+                <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 rounded-xl border border-border">
+                  {[
+                    { key: "1_week", label: "1 Minggu", days: "7 Hari" },
+                    { key: "2_weeks", label: "2 Minggu", days: "14 Hari" },
+                    { key: "4_weeks", label: "4 Minggu", days: "28 Hari" },
+                    { key: "custom", label: "Kustom", days: "Bebas" }
+                  ].map((item) => {
+                    const isSelected = sprintDurationPreset === item.key;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => handleDurationPresetChange(item.key as SprintDurationPreset)}
+                        className={`py-2 px-1 rounded-lg text-center transition-all ${
+                          isSelected
+                            ? "bg-white text-foreground font-black shadow-sm border border-border/80"
+                            : "text-muted-foreground font-bold hover:text-foreground hover:bg-slate-200/50"
+                        }`}
+                      >
+                        <div className="text-[11px] leading-tight">{item.label}</div>
+                        <div className="text-[9px] opacity-75 font-normal">{item.days}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-black text-foreground block">Tanggal Selesai</label>
+                  {sprintDurationPreset !== "custom" && (
+                    <span className="text-[10px] font-bold text-primary">Dihitung Otomatis</span>
+                  )}
+                </div>
+                <input
+                  type="date"
+                  value={sprintForm.endDate}
+                  onChange={(e) => handleEndDateChange(e.target.value)}
+                  disabled={sprintDurationPreset !== "custom"}
+                  readOnly={sprintDurationPreset !== "custom"}
+                  className={`w-full h-10 px-3 text-xs border rounded-xl focus:outline-none ${
+                    sprintDurationPreset !== "custom"
+                      ? "bg-slate-100/80 border-slate-200 text-muted-foreground cursor-not-allowed"
+                      : "bg-slate-50 border-border focus:ring-1 focus:ring-primary"
+                  }`}
+                />
+                {sprintDurationPreset !== "custom" ? (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Dihitung otomatis: {sprintDurationPreset === "1_week" ? "7" : sprintDurationPreset === "2_weeks" ? "14" : "28"} hari kalender total
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Tentukan tanggal selesai sprint secara manual
+                  </p>
+                )}
+              </div>
+
+              {sprintDateError && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 flex items-center gap-2 text-xs font-bold text-red-600">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{sprintDateError}</span>
+                </div>
+              )}
 
               <div className="flex gap-2.5 pt-2">
                 <button
@@ -1173,7 +1336,7 @@ export default function ScrumPlanning() {
                   type="submit"
                   className="flex-1 h-10 bg-primary hover:bg-primary/90 text-white text-xs font-black rounded-xl transition-colors shadow-sm shadow-primary/20"
                 >
-                  Simpan Sprint
+                  {editingSprintId ? "Simpan Perubahan" : "Simpan Sprint"}
                 </button>
               </div>
             </form>
