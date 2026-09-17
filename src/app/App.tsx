@@ -7,6 +7,6 @@ export default function App() {
   return (
     <AuthProvider>
       <RouterProvider router={router} />
-    </AuthProvider>2
+    </AuthProvider>
   );
 }
