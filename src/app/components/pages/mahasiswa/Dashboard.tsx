@@ -364,7 +364,7 @@ export default function Dashboard() {
           ? `Kurang ${formatHourValue(risetWeeklyRemainingMin)} jam dari minimal`
           : `Kurang ${formatHourValue(risetWeeklyRemainingTarget)} jam ke target`;
   const cutiRecent = isRisetStudent
-    ? rawLeaveRecent.filter((item: any) => getLeaveTypeLabel(item) !== "Cuti")
+    ? rawLeaveRecent.filter((item: any) => !["Cuti", "WFH"].includes(getLeaveTypeLabel(item)))
     : rawLeaveRecent;
 
   // Quick links
@@ -372,7 +372,7 @@ export default function Dashboard() {
     { label: "Logbook", icon: <BookOpen size={18} />, href: "/logbook", color: "bg-indigo-50 text-indigo-600 border-indigo-100" },
     { label: "Piket", icon: <ClipboardCheck size={18} />, href: "/picket", color: "bg-emerald-50 text-emerald-600 border-emerald-100" },
     { label: "Riset & Board", icon: <FlaskConical size={18} />, href: "/research", color: "bg-[#F0FFF0] text-[#0AB600] border-green-200" },
-    { label: isRisetStudent ? "Izin / Sakit / WFH" : "Cuti / Izin / WFH", icon: <CalendarOff size={18} />, href: "/leave", color: "bg-amber-50 text-amber-600 border-amber-100" },
+    { label: isRisetStudent ? "Izin / Sakit" : "Cuti / Izin / WFH", icon: <CalendarOff size={18} />, href: "/leave", color: "bg-amber-50 text-amber-600 border-amber-100" },
     { label: "Dokumen & Sertifikat", icon: <Award size={18} />, href: "/documents", color: "bg-emerald-50 text-emerald-600 border-emerald-100" },
     { label: "Berkas Kelulusan", icon: <FileCheck size={18} />, href: "/graduation", color: "bg-teal-50 text-teal-600 border-teal-100" },
     { label: "Draft TA / Jurnal", icon: <ScrollText size={18} />, href: "/draft", color: "bg-blue-50 text-blue-600 border-blue-100" },
@@ -766,7 +766,7 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white border border-border rounded-[14px] shadow-sm overflow-hidden">
-              <SectionHeader icon={<Calendar size={16} className="text-amber-600" />} title={isRisetStudent ? "Pengajuan Izin / Sakit / WFH" : "Pengajuan Cuti / Izin / WFH"} href="/leave" linkLabel="Ajukan" />
+              <SectionHeader icon={<Calendar size={16} className="text-amber-600" />} title={isRisetStudent ? "Pengajuan Izin / Sakit" : "Pengajuan Cuti / Izin / WFH"} href="/leave" linkLabel="Ajukan" />
               <div className="p-4 md:p-5 flex flex-col gap-2 md:gap-3">
                 {/* Sisa cuti visual */}
                 {!isRisetStudent && <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-100 rounded-[10px]">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Layout } from "../../templates/Layout";
+import { OperatorLayout } from "../../templates/OperatorLayout";
 import { apiGet, apiPost } from "../../../lib/api";
 import { CheckCircle, XCircle, Search, FileText } from "lucide-react";
 
@@ -60,7 +60,7 @@ export default function ReaktivasiAlumni() {
   );
 
   return (
-    <Layout title="Reaktivasi Alumni">
+    <OperatorLayout title="Reaktivasi Alumni">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -152,6 +152,6 @@ export default function ReaktivasiAlumni() {
           </div>
         </div>
       </div>
-    </Layout>
+    </OperatorLayout>
   );
 }

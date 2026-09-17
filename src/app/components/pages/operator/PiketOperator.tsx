@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 import { OperatorLayout } from "../../templates/OperatorLayout";
-import { Layout } from "../../templates/Layout";
 import { apiDelete, apiGet, apiPatch, apiPost, getStoredUser } from "../../../lib/api";
 import { useConfirmDialog } from "../../molecules/ConfirmDialog";
 import {
