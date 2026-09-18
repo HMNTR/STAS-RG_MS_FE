@@ -22,6 +22,7 @@ import {
   Sparkles,
   AlertCircle,
   FileText,
+  Loader2,
   X
 } from "lucide-react";
 import { apiGet, apiPost, apiPatch, apiDelete, getStoredUser } from "../../../lib/api";
@@ -73,6 +74,7 @@ interface Member {
   initials?: string;
   role?: string;
   memberType?: string;
+  status?: string;
 }
 
 export default function ScrumPlanning() {
@@ -89,6 +91,8 @@ export default function ScrumPlanning() {
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchBacklog, setSearchBacklog] = useState("");
@@ -119,11 +123,14 @@ export default function ScrumPlanning() {
 
   // Division states
   const [divisions, setDivisions] = useState<ProjectDivision[]>([]);
+  const [divisionsLoading, setDivisionsLoading] = useState(false);
+  const [divisionsError, setDivisionsError] = useState<string | null>(null);
   const [isDivisionModalOpen, setIsDivisionModalOpen] = useState(false);
   const [newDivisionName, setNewDivisionName] = useState("");
   const [editingDivisionId, setEditingDivisionId] = useState<string | null>(null);
   const [editingDivisionName, setEditingDivisionName] = useState("");
   const [divisionActionLoading, setDivisionActionLoading] = useState(false);
+  const activeFetchProjectIdRef = React.useRef<string>("");
 
   // Division Roles states
   const [divisionRolesMap, setDivisionRolesMap] = useState<Record<string, DivisionRole[]>>({});
@@ -131,7 +138,6 @@ export default function ScrumPlanning() {
   const [newRoleInputs, setNewRoleInputs] = useState<Record<string, string>>({});
   const [roleError, setRoleError] = useState<Record<string, string>>({});
   const [roleActionLoading, setRoleActionLoading] = useState(false);
-
 
   // Load Projects
   useEffect(() => {
@@ -157,36 +163,145 @@ export default function ScrumPlanning() {
     loadProjects();
   }, [isDosen, currentUser?.id]);
 
+  // Sync active project if searchParams.projectId changes
+  useEffect(() => {
+    if (selectedProjectId && projects.length > 0) {
+      const match = projects.find((p) => p.id === selectedProjectId);
+      if (match && match.id !== activeProject?.id) {
+        setActiveProject(match);
+      }
+    }
+  }, [selectedProjectId, projects]);
+
+  const loadRolesForDivisions = async (projectId: string, divList: ProjectDivision[]) => {
+    const rolesMap: Record<string, DivisionRole[]> = {};
+    for (const div of divList) {
+      try {
+        const remote = await apiGet<any[]>(`/research/${projectId}/divisions/${div.id}/roles`).catch(() => null);
+        if (Array.isArray(remote) && remote.length > 0) {
+          rolesMap[div.id] = remote.map(normalizeDivisionRole);
+        } else {
+          rolesMap[div.id] = loadStoredDivisionRoles(projectId, div.id);
+        }
+      } catch {
+        rolesMap[div.id] = loadStoredDivisionRoles(projectId, div.id);
+      }
+    }
+    setDivisionRolesMap(rolesMap);
+  };
+
+  const loadDivisions = async (projectId: string) => {
+    setDivisionsLoading(true);
+    setDivisionsError(null);
+    try {
+      const remoteDivs = await apiGet<any[]>(`/research/${projectId}/divisions`);
+      if (activeFetchProjectIdRef.current !== projectId) return [];
+      const rawList = Array.isArray(remoteDivs)
+        ? remoteDivs
+        : Array.isArray((remoteDivs as any)?.data)
+        ? (remoteDivs as any).data
+        : Array.isArray((remoteDivs as any)?.divisions)
+        ? (remoteDivs as any).divisions
+        : [];
+      const normalizedDivs = rawList.map(normalizeDivisionItem);
+      setDivisions(normalizedDivs);
+      loadRolesForDivisions(projectId, normalizedDivs);
+      return normalizedDivs;
+    } catch (err: any) {
+      if (activeFetchProjectIdRef.current !== projectId) return [];
+      const errorMsg = err?.message || "Gagal memuat divisi riset.";
+      setDivisionsError(errorMsg);
+      setDivisions([]);
+      return [];
+    } finally {
+      if (activeFetchProjectIdRef.current === projectId) {
+        setDivisionsLoading(false);
+      }
+    }
+  };
+
+  const loadMembers = async (projectId: string) => {
+    setMembersLoading(true);
+    setMembersError(null);
+    try {
+      const remoteMembers = await apiGet<any[]>(`/research/${projectId}/members`);
+      if (activeFetchProjectIdRef.current !== projectId) return [];
+      const rawList = Array.isArray(remoteMembers)
+        ? remoteMembers
+        : Array.isArray((remoteMembers as any)?.data)
+        ? (remoteMembers as any).data
+        : Array.isArray((remoteMembers as any)?.members)
+        ? (remoteMembers as any).members
+        : [];
+      const mappedMembers: Member[] = rawList.map((m: any) => ({
+        userId: m.user_id || m.userId || m.user?.id || m.id,
+        name: m.name || m.user?.name || "Anggota",
+        initials: m.initials || m.user?.initials,
+        role: m.peran || m.role || "Anggota",
+        memberType: m.member_type || m.memberType || (m.role === "dosen" ? "Dosen" : "Mahasiswa"),
+        status: m.status || "Aktif"
+      }));
+      setMembers(mappedMembers);
+      return mappedMembers;
+    } catch (err: any) {
+      if (activeFetchProjectIdRef.current !== projectId) return [];
+      const errorMsg = err?.message || "Gagal memuat anggota riset.";
+      setMembersError(errorMsg);
+      setMembers([]);
+      return [];
+    } finally {
+      if (activeFetchProjectIdRef.current === projectId) {
+        setMembersLoading(false);
+      }
+    }
+  };
+
   // Load Sprints, Tasks, Members, and Divisions when activeProject changes
   const loadProjectData = async (projectId: string) => {
     if (!projectId) return;
+    activeFetchProjectIdRef.current = projectId;
     setLoading(true);
+    setError("");
+    // Clear previous project data immediately to avoid carrying over options from previous research
+    setSprints([]);
+    setTasks([]);
+    setMembers([]);
+    setDivisions([]);
+    setMembersError(null);
+    setDivisionsError(null);
     try {
-      const [sprintsData, boardData, membersData, divisionsData] = await Promise.all([
-        apiGet<Sprint[]>(`/research/${projectId}/sprints`).catch(() => []),
-        apiGet<any>(`/research/${projectId}/board`).catch(() => ({ tasks: [] })),
-        apiGet<any[]>(`/research/${projectId}/members`).catch(() => []),
-        apiGet<any[]>(`/research/${projectId}/divisions`).catch(() => [])
+      await Promise.all([
+        (async () => {
+          try {
+            const sprintsData = await apiGet<Sprint[]>(`/research/${projectId}/sprints`);
+            if (activeFetchProjectIdRef.current === projectId) {
+              setSprints(Array.isArray(sprintsData) ? sprintsData : (sprintsData as any)?.data || []);
+            }
+          } catch {
+            if (activeFetchProjectIdRef.current === projectId) setSprints([]);
+          }
+        })(),
+        (async () => {
+          try {
+            const boardData = await apiGet<any>(`/research/${projectId}/board`);
+            if (activeFetchProjectIdRef.current === projectId) {
+              setTasks(boardData?.tasks || []);
+            }
+          } catch {
+            if (activeFetchProjectIdRef.current === projectId) setTasks([]);
+          }
+        })(),
+        loadMembers(projectId),
+        loadDivisions(projectId)
       ]);
-
-      setSprints(sprintsData || []);
-      setTasks(boardData?.tasks || []);
-      const normalizedDivs = (divisionsData || []).map(normalizeDivisionItem);
-      setDivisions(normalizedDivs);
-      loadRolesForDivisions(projectId, normalizedDivs);
-      setMembers(
-        (membersData || []).map((m: any) => ({
-          userId: m.user_id || m.userId,
-          name: m.name,
-          initials: m.initials,
-          role: m.peran || m.role || "Anggota",
-          memberType: m.member_type || m.memberType || (m.role === "dosen" ? "Dosen" : "Mahasiswa")
-        }))
-      );
     } catch (err: any) {
-      setError(err?.message || "Gagal memuat detail Scrum");
+      if (activeFetchProjectIdRef.current === projectId) {
+        setError(err?.message || "Gagal memuat detail Scrum");
+      }
     } finally {
-      setLoading(false);
+      if (activeFetchProjectIdRef.current === projectId) {
+        setLoading(false);
+      }
     }
   };
 
@@ -210,8 +325,7 @@ export default function ScrumPlanning() {
     try {
       await apiPost(`/research/${activeProject.id}/divisions`, { name: newDivisionName.trim() });
       setNewDivisionName("");
-      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
-      setDivisions((divs || []).map(normalizeDivisionItem));
+      await loadDivisions(activeProject.id);
     } catch (err: any) {
       alert(err?.message || "Gagal menambahkan divisi.");
     } finally {
@@ -226,8 +340,7 @@ export default function ScrumPlanning() {
       await apiPatch(`/research/${activeProject.id}/divisions/${divisionId}`, { name: editingDivisionName.trim() });
       setEditingDivisionId(null);
       setEditingDivisionName("");
-      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
-      setDivisions((divs || []).map(normalizeDivisionItem));
+      await loadDivisions(activeProject.id);
     } catch (err: any) {
       alert(err?.message || "Gagal mengubah nama divisi.");
     } finally {
@@ -240,8 +353,7 @@ export default function ScrumPlanning() {
     setDivisionActionLoading(true);
     try {
       await apiPatch(`/research/${activeProject.id}/divisions/${divisionId}`, { isActive: !currentActive });
-      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
-      setDivisions((divs || []).map(normalizeDivisionItem));
+      await loadDivisions(activeProject.id);
     } catch (err: any) {
       alert(err?.message || "Gagal mengubah status divisi.");
     } finally {
@@ -264,8 +376,7 @@ export default function ScrumPlanning() {
         apiPatch(`/research/${activeProject.id}/divisions/${currentDiv.id}`, { sortOrder: targetDiv.sortOrder ?? targetIndex }),
         apiPatch(`/research/${activeProject.id}/divisions/${targetDiv.id}`, { sortOrder: currentDiv.sortOrder ?? index })
       ]);
-      const divs = await apiGet<any[]>(`/research/${activeProject.id}/divisions`).catch(() => []);
-      setDivisions((divs || []).map(normalizeDivisionItem));
+      await loadDivisions(activeProject.id);
     } catch (err: any) {
       alert(err?.message || "Gagal mengubah urutan divisi.");
     } finally {
@@ -273,22 +384,7 @@ export default function ScrumPlanning() {
     }
   };
 
-  const loadRolesForDivisions = async (projectId: string, divList: ProjectDivision[]) => {
-    const rolesMap: Record<string, DivisionRole[]> = {};
-    for (const div of divList) {
-      try {
-        const remote = await apiGet<any[]>(`/research/${projectId}/divisions/${div.id}/roles`).catch(() => null);
-        if (Array.isArray(remote) && remote.length > 0) {
-          rolesMap[div.id] = remote.map(normalizeDivisionRole);
-        } else {
-          rolesMap[div.id] = loadStoredDivisionRoles(projectId, div.id);
-        }
-      } catch {
-        rolesMap[div.id] = loadStoredDivisionRoles(projectId, div.id);
-      }
-    }
-    setDivisionRolesMap(rolesMap);
-  };
+
 
   const handleAddDivisionRole = async (divisionId: string, divisionName: string) => {
     if (!activeProject?.id) return;
@@ -1414,7 +1510,23 @@ export default function ScrumPlanning() {
                   Tugaskan ke Mahasiswa (Assignee)
                 </label>
                 <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto p-2 bg-slate-50 border border-border rounded-xl">
-                  {assignableStudents.length === 0 ? (
+                  {membersLoading ? (
+                    <div className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
+                      <Loader2 size={15} className="animate-spin text-purple-600" />
+                      <span>Memuat daftar mahasiswa...</span>
+                    </div>
+                  ) : membersError ? (
+                    <div className="flex flex-col items-center justify-center py-2.5 px-3 text-center text-xs text-red-600 bg-red-50/70 border border-red-200 rounded-lg">
+                      <p className="font-semibold text-[11px]">Gagal memuat mahasiswa: {membersError}</p>
+                      <button
+                        type="button"
+                        onClick={() => activeProject?.id && loadMembers(activeProject.id)}
+                        className="text-[11px] text-purple-700 underline mt-1 hover:text-purple-900 font-bold"
+                      >
+                        Coba lagi
+                      </button>
+                    </div>
+                  ) : assignableStudents.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-2">
                       Belum ada mahasiswa di riset ini untuk ditugaskan.
                     </p>
@@ -1465,22 +1577,40 @@ export default function ScrumPlanning() {
                 <label className="text-xs font-black text-foreground block mb-1">
                   Divisi {divisions.filter((d) => d.isActive !== false).length > 0 && <span className="text-red-500">*</span>}
                 </label>
-                <select
-                  value={taskForm.divisionId || ""}
-                  onChange={(e) => setTaskForm({ ...taskForm, divisionId: e.target.value || null })}
-                  className="w-full h-10 px-3 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-                >
-                  {divisions.filter((d) => d.isActive !== false).length > 0 ? (
-                    <option value="">-- Pilih Divisi --</option>
-                  ) : (
-                    <option value="">Tanpa Divisi (Proyek belum memiliki divisi)</option>
-                  )}
-                  {divisions.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} {d.isActive === false ? "(Nonaktif)" : ""}
-                    </option>
-                  ))}
-                </select>
+                {divisionsLoading ? (
+                  <div className="flex items-center gap-2 h-10 px-3 text-xs text-muted-foreground bg-slate-50 border border-border rounded-xl">
+                    <Loader2 size={14} className="animate-spin text-purple-600" />
+                    <span>Memuat divisi riset...</span>
+                  </div>
+                ) : divisionsError ? (
+                  <div className="flex items-center justify-between h-10 px-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl">
+                    <span className="truncate text-[11px] font-semibold">Gagal memuat divisi: {divisionsError}</span>
+                    <button
+                      type="button"
+                      onClick={() => activeProject?.id && loadDivisions(activeProject.id)}
+                      className="text-[11px] text-purple-700 underline font-bold shrink-0 ml-2 hover:text-purple-900"
+                    >
+                      Coba lagi
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={taskForm.divisionId || ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, divisionId: e.target.value || null })}
+                    className="w-full h-10 px-3 text-xs bg-slate-50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    {divisions.filter((d) => d.isActive !== false).length > 0 ? (
+                      <option value="">-- Pilih Divisi --</option>
+                    ) : (
+                      <option value="">Tanpa Divisi (Proyek belum memiliki divisi)</option>
+                    )}
+                    {divisions.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} {d.isActive === false ? "(Nonaktif)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Sprint Destination */}
@@ -1582,7 +1712,23 @@ export default function ScrumPlanning() {
                   Daftar Divisi ({divisions.length})
                 </span>
 
-                {divisions.length === 0 ? (
+                {divisionsLoading ? (
+                  <div className="p-6 text-center border-2 border-dashed border-border rounded-xl text-xs text-muted-foreground flex items-center justify-center gap-2">
+                    <Loader2 size={16} className="animate-spin text-purple-600" />
+                    <span>Memuat divisi...</span>
+                  </div>
+                ) : divisionsError ? (
+                  <div className="p-4 text-center bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 flex flex-col items-center gap-1.5">
+                    <span className="font-semibold text-[11px]">Gagal memuat divisi: {divisionsError}</span>
+                    <button
+                      type="button"
+                      onClick={() => activeProject?.id && loadDivisions(activeProject.id)}
+                      className="text-purple-700 underline font-bold hover:text-purple-900 text-xs"
+                    >
+                      Coba lagi
+                    </button>
+                  </div>
+                ) : divisions.length === 0 ? (
                   <div className="p-6 text-center border-2 border-dashed border-border rounded-xl text-xs text-muted-foreground">
                     Belum ada divisi untuk proyek ini. Silakan tambah divisi di atas.
                   </div>
