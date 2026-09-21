@@ -415,6 +415,14 @@ export function formatGitHubError(error: any): string {
       return "Task sudah terhubung ke repository tersebut.";
     case "SCRUM_REPOSITORY_NOT_FOUND":
       return "Repository tidak ditemukan.";
+    case "SCRUM_GITHUB_NOT_CONFIGURED":
+      return "GitHub App belum dikonfigurasi pada server.";
+    case "SCRUM_GITHUB_INSTALLATION_MISMATCH":
+      return "Installation ID tidak sesuai dengan GitHub App installation repository ini.";
+    case "SCRUM_GITHUB_REPOSITORY_NOT_ACCESSIBLE":
+      return "Repository tidak ditemukan atau GitHub App STAS-RG Scrum belum memiliki akses ke repository tersebut.";
+    case "SCRUM_GITHUB_API_UNAVAILABLE":
+      return "GitHub API tidak dapat memvalidasi repository saat ini. Silakan coba kembali.";
     case "SCRUM_TASK_NOT_FOUND":
       return "Task tidak ditemukan.";
     default:
