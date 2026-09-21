@@ -1,6 +1,6 @@
 import { ProfileAvatar } from "../molecules/ProfileAvatar";
 import React, { useEffect, useState, useMemo } from "react";
-import { X, Plus, Trash2, FileText, Lock, UploadCloud, CheckCircle2, GraduationCap, Star, User, FlaskConical } from "lucide-react";
+import { X, Plus, Trash2, FileText, Lock, UploadCloud, CheckCircle2, GraduationCap, Star, User, FlaskConical, AlertCircle } from "lucide-react";
 import { apiGet, apiPost, apiPut, apiDelete, resolveApiAssetUrl } from "../../lib/api";
 import { getWfhSummary, getWfhSourceMeta } from "../../lib/wfh";
 import { MAHASISWA_RESEARCH_ROLES } from "../../lib/researchRoles";
@@ -297,7 +297,7 @@ export function StudentModal({ isOpen, mode, studentId, onClose, onSaveSuccess, 
         prodi: d.prodi || "",
         fakultas: detailFakultas !== "-" ? detailFakultas : "",
         pembimbing: d.pembimbing || "",
-        bergabung: formatDateOnly(d.bergabung),
+        bergabung: toDateInputValue(d.bergabung),
         wfhQuota: String(d.wfhFallbackQuota ?? 0),
         status: d.status || "Aktif",
         tipe: d.tipe || "Riset",
@@ -371,6 +371,18 @@ export function StudentModal({ isOpen, mode, studentId, onClose, onSaveSuccess, 
     setError("");
 
     try {
+      const cleanDate = (val?: string | null) => {
+        if (!val) return null;
+        const trimmed = String(val).trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+      };
+
+      const cleanEmail = (val?: string | null) => {
+        if (!val) return null;
+        const trimmed = String(val).trim();
+        return trimmed === "" || trimmed === "-" ? null : trimmed;
+      };
+
       const payload = {
         nim: form.nim.trim(),
         name: form.name.trim(),
@@ -379,18 +391,20 @@ export function StudentModal({ isOpen, mode, studentId, onClose, onSaveSuccess, 
         fakultas: form.fakultas.trim() || null,
         password: form.password.trim() || null,
         angkatan: form.angkatan.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim(),
+        email: cleanEmail(form.email),
+        phone: form.phone.trim() || null,
         status: form.status,
         tipe: form.tipe,
-        pembimbing: form.pembimbing.trim(),
-        bergabung: form.bergabung || null,
+        pembimbing: form.pembimbing.trim() || null,
+        bergabung: cleanDate(form.bergabung),
         wfhQuota: form.wfhQuota === "" ? 0 : Number(form.wfhQuota) || 0,
-        riset: form.risetMemberships.map((membership) => ({
-          projectId: membership.projectId,
-          bergabung: membership.bergabung || form.bergabung || null,
-          selesai: membership.selesai || null,
-        })),
+        riset: form.risetMemberships
+          .filter((membership) => Boolean(membership.projectId && String(membership.projectId).trim()))
+          .map((membership) => ({
+            projectId: String(membership.projectId).trim(),
+            bergabung: cleanDate(membership.bergabung) || cleanDate(form.bergabung),
+            selesai: cleanDate(membership.selesai),
+          })),
       };
 
       if (mode === "add") {
@@ -465,6 +479,21 @@ if (!isOpen) return null;
                 <X size={16} />
               </button>
             </div>
+
+            {error && (
+              <div className="mx-6 mt-4 p-3 rounded-[12px] bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-start gap-2.5">
+                <AlertCircle size={16} className="shrink-0 mt-0.5 text-red-600" />
+                <span className="flex-1 leading-relaxed">{error}</span>
+                <button
+                  type="button"
+                  onClick={() => setError("")}
+                  className="text-red-400 hover:text-red-700 p-0.5 rounded transition-colors"
+                  aria-label="Tutup pesan error"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
 
             <div className="p-6 grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -920,6 +949,23 @@ if (!isOpen) return null;
                 </div>
               </div>
             </div>
+
+            {error && (
+              <div className="px-6 pb-3">
+                <div className="p-3 rounded-[12px] bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-start gap-2.5">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5 text-red-600" />
+                  <span className="flex-1 leading-relaxed">{error}</span>
+                  <button
+                    type="button"
+                    onClick={() => setError("")}
+                    className="text-red-400 hover:text-red-700 p-0.5 rounded transition-colors"
+                    aria-label="Tutup pesan error"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="px-6 pb-6 flex gap-3">
               <button
