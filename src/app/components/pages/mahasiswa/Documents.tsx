@@ -175,6 +175,8 @@ export default function Documents() {
   const [uploadModal, setUploadModal] = useState<{ type: string; label: string } | null>(null);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState("");
+  const [isAlumni, setIsAlumni] = useState(false);
+  const [certificateEligible, setCertificateEligible] = useState<boolean | null>(null);
   const effectiveStudentId = String(studentRecordId || user?.id || "").trim();
 
   useEffect(() => {
@@ -184,6 +186,10 @@ export default function Documents() {
       try {
         const profile = await apiGet<any>(`/profile/${encodePathSegment(user.id)}`);
         setStudentDocuments(normalizeStudentDocuments(profile, profile?.status || profile?.studentStatus));
+        const status = String(profile?.status || profile?.studentStatus || "").toLowerCase();
+        if (status === "alumni") {
+          setIsAlumni(true);
+        }
         const resolvedId = String(profile?.id || profile?.student_id || "").trim();
         if (resolvedId) {
           setStudentRecordId(resolvedId);
@@ -201,12 +207,13 @@ export default function Documents() {
     const loadData = async () => {
       try {
         const studentId = effectiveStudentId;
-        const [rows, certRows, projectRows, officialRows] = await Promise.all([
+        const [rows, certRows, projectRows, officialRows, gradRes] = await Promise.all([
           apiGet<Array<any>>(buildQueryPath("/letter-requests", { studentId })),
           apiGet<Array<any>>(buildQueryPath("/certificates", { studentId })),
           user?.id ? apiGet<Array<any>>(buildQueryPath("/research/assigned", { userId: user.id })) : Promise.resolve([]),
           apiGet<OfficialDocumentListResponse>(buildQueryPath("/document-center/my/documents", { limit: 100, offset: 0 }))
             .catch(() => ({ items: [], pagination: { limit: 100, offset: 0, total: 0 } })),
+          apiGet<any>("/graduation-submissions/me").catch(() => null),
         ]);
         const mapped: SuratRecord[] = rows
           .map((item) => ({
@@ -233,6 +240,21 @@ export default function Documents() {
         setSuratData(mapped);
         setCertificateData(mappedCerts);
         setOfficialDocuments(Array.isArray(officialRows.items) ? officialRows.items : []);
+
+        if (gradRes) {
+          const status = String(gradRes.student?.status || gradRes.student?.studentStatus || "").toLowerCase();
+          if (status === "alumni") {
+            setIsAlumni(true);
+          }
+          if (gradRes.submission) {
+            setCertificateEligible(gradRes.submission.certificateEligible ?? gradRes.submission.certificate_eligible ?? true);
+          } else if (certRows.length > 0 && certRows[0].certificate_eligible !== undefined) {
+            setCertificateEligible(certRows[0].certificate_eligible);
+          }
+        } else if (certRows.length > 0 && certRows[0].certificate_eligible !== undefined) {
+          setCertificateEligible(certRows[0].certificate_eligible);
+        }
+
         const projectOptions = (projectRows || []).map((item) => ({
           id: item.id,
           title: item.short_title || item.title || item.id
@@ -316,6 +338,10 @@ export default function Documents() {
   const submitCertificateRequest = async () => {
     if (!studentRecordId || !user?.id) {
       setError("User tidak ditemukan. Silakan login ulang.");
+      return;
+    }
+    if (isAlumni && certificateEligible === false) {
+      setError("Sertifikat tidak dapat diajukan karena berkas kelulusan belum lengkap. Silakan lengkapi berkas di menu Kelulusan.");
       return;
     }
     if (!certProjectId) {
@@ -421,8 +447,19 @@ export default function Documents() {
           )}
           {activeTab === "sertifikat" && (
             <button
-              onClick={() => setCertModalOpen(true)}
-              className="bg-[#6C47FF] hover:bg-[#5835e5] text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm shadow-[#6C47FF]/20 transition-all flex items-center gap-2"
+              onClick={() => {
+                if (isAlumni && certificateEligible === false) {
+                  setError("Sertifikat tidak dapat diajukan karena kelulusan dilakukan dengan dispensasi tanpa kelengkapan berkas. Silakan lengkapi berkas di menu Kelulusan.");
+                  return;
+                }
+                setCertModalOpen(true);
+              }}
+              className={`px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all flex items-center gap-2 ${
+                isAlumni && certificateEligible === false
+                  ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                  : "bg-[#6C47FF] hover:bg-[#5835e5] text-white shadow-[#6C47FF]/20"
+              }`}
+              title={isAlumni && certificateEligible === false ? "Hak sertifikat ditangguhkan karena berkas kelulusan belum lengkap" : undefined}
             >
               <Plus size={16} strokeWidth={3} />
               Ajukan Sertifikat
@@ -459,9 +496,11 @@ export default function Documents() {
                           ? `${publishedDocuments.length} dokumen terbit${primaryOfficialDocument?.documentNumber ? ` • ${primaryOfficialDocument.documentNumber}` : ""}`
                           : doc.fileName
                           ? `${doc.fileName}${doc.fileSize ? ` • ${formatFileSize(doc.fileSize)}` : ""}`
-                          : doc.locked
-                            ? doc.lockReason || "Tersedia setelah status Alumni."
-                            : "Belum diunggah admin."}
+                          : doc.type === "sertifikat" && isAlumni && certificateEligible === false
+                            ? "Ditangguhkan: Lengkapi berkas kelulusan untuk membuka hak sertifikat."
+                            : doc.locked
+                              ? doc.lockReason || "Tersedia setelah status Alumni."
+                              : "Belum diunggah admin."}
                       </p>
                       {doc.type === "sertifikat" && publishedDocuments.length > 0 ? (
                         <button
@@ -648,6 +687,28 @@ export default function Documents() {
         {/* ─── TAB: SERTIFIKAT ─── */}
         {activeTab === "sertifikat" && (
           <div className="flex flex-col gap-4">
+            {isAlumni && certificateEligible === false && (
+              <div className="bg-amber-50 border border-amber-200 rounded-[16px] p-5 flex items-start gap-4 text-amber-900 shadow-sm">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-bold text-amber-900">Hak Penerbitan Sertifikat Ditangguhkan</h4>
+                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                    Anda telah dinyatakan lulus sebagai Alumni melalui dispensasi khusus operator/admin, namun berkas kelulusan Anda belum lengkap atau belum divalidasi.
+                    Pengajuan dan penerbitan sertifikat ditangguhkan sampai Anda melengkapi berkas kelulusan Anda.
+                  </p>
+                  <div className="mt-3">
+                    <a
+                      href="/mahasiswa/graduation"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-sm shadow-amber-600/20"
+                    >
+                      Lengkapi Berkas Kelulusan Sekarang
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
             {officialDocumentsForType("sertifikat").length === 0 && certificateData.length === 0 ? (
               <div className="border-2 border-dashed border-slate-200 rounded-[18px] p-10 flex flex-col items-center justify-center text-center gap-3 bg-slate-50/50">
                 <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-slate-300 shadow-sm">

@@ -371,6 +371,7 @@ export default function GraduationSubmission() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [history, setHistory] = useState<any[]>([]);
+  const [certificateEligible, setCertificateEligible] = useState(true);
   const { login } = useAuth();
 
   const completion = useMemo(() => {
@@ -400,16 +401,20 @@ export default function GraduationSubmission() {
       })
     ), [projects]);
 
-  const graduationAllowed = Boolean(graduationAllowedAt) && submissionStatus === "Valid" && studentStatus !== "Alumni";
-  const reviewLocked = submissionStatus === "Valid" || studentStatus === "Alumni";
+  const isAlumni = studentStatus === "Alumni";
+  const needsCertificateCompletion = isAlumni && !certificateEligible;
+  const graduationAllowed = Boolean(graduationAllowedAt) && submissionStatus === "Valid" && !isAlumni;
+  const reviewLocked = (submissionStatus === "Valid" && !needsCertificateCompletion) || (isAlumni && !needsCertificateCompletion);
   const canSaveDraft = projects.length > 0 && !reviewLocked && !savingDraft && !hasInvalidFilledUrl;
-  const canSubmit = completion.complete && !submitting && projects.length > 0 && !reviewLocked;
+  const canSubmit = (completion.complete || needsCertificateCompletion) && !submitting && projects.length > 0 && !reviewLocked;
   const canBecomeAlumni = graduationAllowed && !becomingAlumni;
-  const submitLabel = submissionStatus === "Revisi"
-    ? "Kirim Ulang Berkas Kelulusan"
-    : submissionStatus === "Dikirim"
-      ? "Perbarui Berkas Kelulusan"
-      : "Kirim Berkas Kelulusan";
+  const submitLabel = needsCertificateCompletion
+    ? "Kirim Berkas untuk Verifikasi Sertifikat"
+    : submissionStatus === "Revisi"
+      ? "Kirim Ulang Berkas Kelulusan"
+      : submissionStatus === "Dikirim"
+        ? "Perbarui Berkas Kelulusan"
+        : "Kirim Berkas Kelulusan";
 
   useEffect(() => {
     const load = async () => {
@@ -422,6 +427,7 @@ export default function GraduationSubmission() {
         setSubmissionStatus(data?.submission?.status || "");
         setSubmittedAt(data?.submission?.submittedAt || data?.submission?.submitted_at || "");
         setGraduationAllowedAt(data?.submission?.graduationAllowedAt || data?.submission?.graduation_allowed_at || "");
+        setCertificateEligible(data?.submission?.certificateEligible ?? data?.submission?.certificate_eligible ?? true);
         setLastSavedAt(data?.submission?.updatedAt || data?.submission?.updated_at || data?.submission?.createdAt || data?.submission?.created_at || "");
 
         // Load History
@@ -500,6 +506,7 @@ export default function GraduationSubmission() {
       setSubmissionStatus(result?.submission?.status || "Dikirim");
       setSubmittedAt(result?.submission?.submittedAt || result?.submission?.submitted_at || new Date().toISOString());
       setGraduationAllowedAt(result?.submission?.graduationAllowedAt || result?.submission?.graduation_allowed_at || "");
+      setCertificateEligible(result?.submission?.certificateEligible ?? result?.submission?.certificate_eligible ?? certificateEligible);
       setLastSavedAt(result?.submission?.updatedAt || result?.submission?.updated_at || new Date().toISOString());
       setMessage(result?.message || "Berkas kelulusan berhasil dikirim.");
 
@@ -535,6 +542,7 @@ export default function GraduationSubmission() {
       setSubmissionStatus(result?.submission?.status || "Valid");
       setSubmittedAt(result?.submission?.submittedAt || result?.submission?.submitted_at || submittedAt);
       setGraduationAllowedAt(result?.submission?.graduationAllowedAt || result?.submission?.graduation_allowed_at || graduationAllowedAt);
+      setCertificateEligible(result?.submission?.certificateEligible ?? result?.submission?.certificate_eligible ?? true);
       setMessage(result?.message || "Status kamu berhasil menjadi Alumni STAS-RG.");
 
       const currentUser = getStoredUser();
@@ -656,13 +664,26 @@ export default function GraduationSubmission() {
 
         {submissionStatus === "Valid" && graduationAllowed && (
           <div className="rounded-[16px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
-            Semua link sudah ACC dan admin sudah memberi izin lulus. Kamu bisa klik tombol Jadi Alumni STAS-RG di bawah.
+            {completion.complete
+              ? "Semua link berkas sudah ACC dan admin sudah memberi izin lulus. Kamu bisa klik tombol Jadi Alumni STAS-RG di bawah."
+              : "Admin telah memberikan izin lulus (dispensasi). Kamu bisa langsung klik tombol Jadi Alumni STAS-RG di bawah meskipun berkas belum lengkap."}
           </div>
         )}
 
-        {studentStatus === "Alumni" && (
+        {studentStatus === "Alumni" && certificateEligible && (
           <div className="rounded-[16px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold text-sky-800">
-            Status kamu sudah Alumni STAS-RG. Form berkas kelulusan dikunci sebagai arsip.
+            Status kamu sudah resmi Alumni STAS-RG. Berkas kelulusan telah lengkap dan terverifikasi untuk penerbitan sertifikat.
+          </div>
+        )}
+
+        {studentStatus === "Alumni" && !certificateEligible && (
+          <div className="rounded-[16px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900 flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-amber-800 font-black">
+              <AlertTriangle size={16} /> Status: Alumni STAS-RG (Lulus via Dispensasi Admin)
+            </div>
+            <p className="text-xs font-semibold text-amber-800">
+              Sertifikat kelulusan <strong>belum diterbitkan</strong> karena berkas kelulusan Anda belum lengkap saat diluluskan oleh Admin. Silakan lengkapi dan kirimkan berkas di bawah ini jika Anda ingin mengajukan verifikasi berkas untuk penerbitan sertifikat resmi.
+            </p>
           </div>
         )}
 

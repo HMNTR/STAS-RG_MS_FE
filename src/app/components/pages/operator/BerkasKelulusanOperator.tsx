@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, Eye, FileCheck, Loader2, Search, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Eye, FileCheck, GraduationCap, Loader2, Search, X } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "../../../lib/api";
 import { OperatorLayout } from "../../templates/OperatorLayout";
 
@@ -38,6 +38,8 @@ type GraduationSubmission = {
   graduation_allowed_at?: string | null;
   graduationCompletedAt?: string | null;
   graduation_completed_at?: string | null;
+  certificateEligible?: boolean;
+  certificate_eligible?: boolean;
   student?: {
     id?: string;
     nim?: string;
@@ -306,6 +308,12 @@ export default function BerkasKelulusanOperator() {
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [reviewingKey, setReviewingKey] = useState<string | null>(null);
   const [allowing, setAllowing] = useState(false);
+  const [graduating, setGraduating] = useState(false);
+  const [directGraduateModalOpen, setDirectGraduateModalOpen] = useState(false);
+  const [activeStudents, setActiveStudents] = useState<any[]>([]);
+  const [loadingActiveStudents, setLoadingActiveStudents] = useState(false);
+  const [selectedStudentToGraduate, setSelectedStudentToGraduate] = useState<string>("");
+  const [directGraduateSubmitting, setDirectGraduateSubmitting] = useState(false);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
 
@@ -436,6 +444,82 @@ export default function BerkasKelulusanOperator() {
     }
   };
 
+  const handleGraduateByAdmin = async () => {
+    if (!selected?.id || graduating) return;
+    if (selected?.student?.status === "Alumni") {
+      setError("Mahasiswa ini sudah berstatus Alumni STAS-RG.");
+      return;
+    }
+
+    const fullyAccepted = isSubmissionFullyAccepted(selected);
+    if (!fullyAccepted) {
+      const confirmed = window.confirm(
+        "⚠️ PERINGATAN KELULUSAN DISPENSASI:\n\nBerkas kelulusan mahasiswa ini BELUM LENGKAP atau BELUM SEMUA DI-ACC.\n\nJika diluluskan sekarang, mahasiswa akan resmi menjadi Alumni STAS-RG namun TIDAK MENDAPATKAN SERTIFIKAT (sertifikat ditangguhkan sampai berkas dipenuhi).\n\nApakah Anda yakin ingin meluluskan mahasiswa ini sekarang?"
+      );
+      if (!confirmed) return;
+    } else {
+      const confirmed = window.confirm(
+        "Luluskan mahasiswa ini sekarang menjadi Alumni STAS-RG?\n\nBerkas kelulusan sudah lengkap dan ACC. Sertifikat berhak diterbitkan."
+      );
+      if (!confirmed) return;
+    }
+
+    setGraduating(true);
+    setError("");
+    try {
+      const detail = await apiPost<GraduationSubmission>(
+        `/graduation-submissions/${encodeURIComponent(selected.id)}/graduate-by-admin`
+      );
+      syncSelectedDetail(detail);
+      await loadItems();
+    } catch (err: any) {
+      setError(err?.message || "Gagal meluluskan mahasiswa.");
+    } finally {
+      setGraduating(false);
+    }
+  };
+
+  const openDirectGraduateModal = async () => {
+    setDirectGraduateModalOpen(true);
+    setSelectedStudentToGraduate("");
+    setLoadingActiveStudents(true);
+    try {
+      const data = await apiGet<any>("/students?status=Aktif&limit=100");
+      const list = Array.isArray(data) ? data : data?.students || data?.items || [];
+      setActiveStudents(list);
+    } catch {
+      setActiveStudents([]);
+    } finally {
+      setLoadingActiveStudents(false);
+    }
+  };
+
+  const handleDirectGraduateSubmit = async () => {
+    if (!selectedStudentToGraduate || directGraduateSubmitting) return;
+    const student = activeStudents.find((s) => s.id === selectedStudentToGraduate);
+    const studentName = student?.name || "Mahasiswa ini";
+
+    const confirmed = window.confirm(
+      `⚠️ PERINGATAN KELULUSAN DISPENSASI:\n\nLuluskan ${studentName} secara langsung menjadi Alumni STAS-RG tanpa menunggu pengisian berkas kelulusan?\n\nMahasiswa TIDAK AKAN MENDAPATKAN SERTIFIKAT sampai berkas kelulusan dilengkapi.`
+    );
+    if (!confirmed) return;
+
+    setDirectGraduateSubmitting(true);
+    setError("");
+    try {
+      await apiPost("/graduation-submissions/direct-graduate", {
+        studentId: selectedStudentToGraduate,
+        note: "Diluluskan langsung oleh Admin/Operator tanpa berkas kelulusan (Sertifikat ditangguhkan)."
+      });
+      setDirectGraduateModalOpen(false);
+      await loadItems();
+    } catch (err: any) {
+      setError(err?.message || "Gagal meluluskan mahasiswa secara langsung.");
+    } finally {
+      setDirectGraduateSubmitting(false);
+    }
+  };
+
   const graduationAlreadyAllowed = Boolean(getGraduationAllowedAt(selected));
   const selectedFullyAccepted = isSubmissionFullyAccepted(selected);
   const canAllowSelected = selected?.student?.status !== "Alumni" && !graduationAlreadyAllowed;
@@ -470,12 +554,21 @@ export default function BerkasKelulusanOperator() {
                 Admin bisa ACC/Tolak setiap link. Setelah semua link ACC, admin memberi izin lulus agar tombol Alumni muncul di mahasiswa.
               </p>
             </div>
-            <button
-              onClick={() => void loadItems()}
-              className="h-10 rounded-[12px] bg-emerald-600 px-4 text-xs font-black text-white transition-colors hover:bg-emerald-700"
-            >
-              Refresh Data
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void openDirectGraduateModal()}
+                className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-sky-600 px-4 text-xs font-black text-white shadow-sm transition-colors hover:bg-sky-700"
+              >
+                <GraduationCap size={15} /> Luluskan Mahasiswa Langsung
+              </button>
+              <button
+                onClick={() => void loadItems()}
+                className="h-10 rounded-[12px] bg-emerald-600 px-4 text-xs font-black text-white transition-colors hover:bg-emerald-700"
+              >
+                Refresh Data
+              </button>
+            </div>
           </div>
         </div>
 
@@ -627,24 +720,50 @@ export default function BerkasKelulusanOperator() {
                 </div>
               </div>
 
-              <div className="mb-5 rounded-[16px] border border-emerald-100 bg-emerald-50 p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-sm font-black text-emerald-900">Izin Lulus Mahasiswa</p>
-                    <p className="mt-1 text-xs font-semibold text-emerald-800">
-                      Setelah seluruh link wajib terisi dan ACC, admin memberi izin lulus. Mahasiswa tetap harus klik Jadi Alumni STAS-RG sendiri.
-                    </p>
+              <div className="mb-5 rounded-[16px] border border-emerald-200 bg-emerald-50/80 p-4">
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-black text-emerald-950">Kelulusan Mahasiswa (Aksi Admin)</p>
+                      <p className="mt-0.5 text-xs font-semibold text-emerald-800">
+                        Admin dapat meluluskan mahasiswa langsung menjadi Alumni meskipun berkas belum lengkap (dispensasi). Sesuai aturan, mahasiswa tidak mendapatkan sertifikat jika berkas tidak dipenuhi.
+                      </p>
+                    </div>
+                    <div>
+                      {isSubmissionFullyAccepted(selected) ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black text-emerald-800 border border-emerald-300">
+                          <CheckCircle2 size={13} /> Sertifikat Berhak Diterbitkan
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black text-amber-800 border border-amber-300">
+                          <AlertTriangle size={13} /> Sertifikat Ditangguhkan (Berkas Belum Lengkap)
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleAllowGraduation()}
-                    disabled={!canAllowSelected || allowing}
-                    title={allowGraduationHint}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-emerald-600 px-4 text-xs font-black text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white/90 disabled:hover:bg-slate-300"
-                  >
-                    {allowing ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-                    {allowGraduationLabel}
-                  </button>
+
+                  <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-emerald-200">
+                    <button
+                      type="button"
+                      onClick={() => void handleGraduateByAdmin()}
+                      disabled={selected?.student?.status === "Alumni" || graduating}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-sky-600 px-4 text-xs font-black text-white shadow-sm transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {graduating ? <Loader2 size={15} className="animate-spin" /> : <GraduationCap size={15} />}
+                      {selected?.student?.status === "Alumni" ? "Sudah Alumni" : "Luluskan Mahasiswa Sekarang"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleAllowGraduation()}
+                      disabled={!canAllowSelected || allowing}
+                      title={allowGraduationHint}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] border border-emerald-600 bg-white px-4 text-xs font-black text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {allowing ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                      {allowGraduationLabel}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -687,6 +806,86 @@ export default function BerkasKelulusanOperator() {
                   );
                 })}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {directGraduateModalOpen && (
+        <div
+          className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onClick={() => setDirectGraduateModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-[22px] bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-border pb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <GraduationCap size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-foreground">Luluskan Mahasiswa Langsung</h3>
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    Pilih mahasiswa aktif untuk diluluskan langsung menjadi Alumni.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setDirectGraduateModalOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="my-5 flex flex-col gap-4">
+              <div className="rounded-[14px] border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
+                ⚠️ <strong>Perhatian:</strong> Mahasiswa yang diluluskan melalui opsi ini akan langsung menjadi <strong>Alumni</strong> dengan <strong>Sertifikat Ditangguhkan</strong> (karena belum mengisi dan memverifikasi berkas kelulusan).
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-black text-foreground uppercase tracking-wide">
+                  Pilih Mahasiswa Aktif:
+                </label>
+                {loadingActiveStudents ? (
+                  <div className="flex items-center justify-center py-4 text-xs font-bold text-slate-500 gap-2">
+                    <Loader2 size={15} className="animate-spin" /> Memuat data mahasiswa...
+                  </div>
+                ) : (
+                  <select
+                    value={selectedStudentToGraduate}
+                    onChange={(e) => setSelectedStudentToGraduate(e.target.value)}
+                    className="h-11 w-full rounded-[12px] border border-border bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-sky-300 focus:bg-white focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="">-- Pilih Mahasiswa --</option>
+                    {activeStudents.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name || s.student_name || "Mahasiswa"} ({s.nim || "-"}) - {s.tipe || "Riset"}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+              <button
+                type="button"
+                onClick={() => setDirectGraduateModalOpen(false)}
+                className="h-10 rounded-[12px] bg-slate-100 px-4 text-xs font-bold text-slate-600 hover:bg-slate-200"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDirectGraduateSubmit()}
+                disabled={!selectedStudentToGraduate || directGraduateSubmitting}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-sky-600 px-5 text-xs font-black text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {directGraduateSubmitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                Luluskan Sekarang (Dispensasi)
+              </button>
             </div>
           </div>
         </div>
