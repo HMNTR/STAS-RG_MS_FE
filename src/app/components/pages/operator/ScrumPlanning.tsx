@@ -713,7 +713,9 @@ export default function ScrumPlanning() {
     setIsTaskModalOpen(true);
   };
 
-  const openCreateTaskModal = (defaultSprintId: string | null = null) => {
+  const activeSprint = sprints.find((s) => s.status === "active");
+
+  const openCreateTaskModal = (defaultSprintId?: string | null) => {
     setIsEditingTask(false);
     setTaskForm({
       id: "",
@@ -721,7 +723,7 @@ export default function ScrumPlanning() {
       description: "",
       storyPoints: 3,
       assigneeIds: [],
-      sprintId: defaultSprintId,
+      sprintId: defaultSprintId !== undefined ? defaultSprintId : (activeSprint?.id || null),
       divisionId: ""
     });
     setIsTaskModalOpen(true);
@@ -732,8 +734,6 @@ export default function ScrumPlanning() {
     if (!searchBacklog.trim()) return true;
     return t.title.toLowerCase().includes(searchBacklog.toLowerCase());
   });
-
-  const activeSprint = sprints.find((s) => s.status === "active");
 
   // Hanya mahasiswa yang dapat ditugaskan (Dosen bertindak sebagai pemberi tugas)
   const assignableStudents = members.filter((m) => {
@@ -901,6 +901,15 @@ export default function ScrumPlanning() {
 
             {/* Backlog List */}
             <div className="flex flex-col gap-2.5 max-h-[600px] overflow-y-auto pr-1">
+              {activeSprint && backlogTasks.some((t) => t.status === "DOING" || t.status === "REVIEW") && (
+                <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-3 text-[11px] text-amber-950 flex items-start gap-2 shadow-sm">
+                  <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Ada tugas aktif di Backlog: </span>
+                    Tugas berlabel <span className="font-bold text-blue-700">DOING</span> sudah mulai dikerjakan oleh mahasiswa. Agar masuk ke dalam sprint aktif dan tampil di Progress Board, pilih <strong>{activeSprint.name}</strong> pada menu <em>"+ Masukkan ke Sprint..."</em> di bawah kartu tugas.
+                  </div>
+                </div>
+              )}
               {backlogTasks.length === 0 ? (
                 <div className="p-8 text-center border-2 border-dashed border-border rounded-2xl">
                   <p className="text-xs font-bold text-muted-foreground mb-2">Backlog kosong</p>
@@ -916,11 +925,16 @@ export default function ScrumPlanning() {
                     task.divisionName ||
                     task.division_name ||
                     divisions.find((d) => d.id === (task.divisionId ?? task.division_id))?.name;
+                  const isTaskActive = task.status === "DOING" || task.status === "REVIEW";
 
                   return (
                     <div
                       key={task.id}
-                      className="p-3.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 rounded-xl transition-all flex flex-col gap-2 group"
+                      className={`p-3.5 rounded-xl transition-all flex flex-col gap-2 group border ${
+                        isTaskActive
+                          ? "bg-amber-50/40 hover:bg-amber-50/70 border-amber-300 shadow-sm"
+                          : "bg-slate-50 hover:bg-slate-100/80 border-slate-200/80"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-xs font-bold text-foreground leading-snug">{task.title}</p>
@@ -951,6 +965,22 @@ export default function ScrumPlanning() {
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-50 text-purple-700 border border-purple-200">
                             ⚡ {sp} SP
                           </span>
+
+                          {task.status === "DOING" && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200" title="Tugas ini sedang dikerjakan mahasiswa tetapi masih di Product Backlog">
+                              DOING
+                            </span>
+                          )}
+                          {task.status === "REVIEW" && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200" title="Tugas ini dalam tahap review tetapi masih di Product Backlog">
+                              REVIEW
+                            </span>
+                          )}
+                          {task.status === "DONE" && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              DONE
+                            </span>
+                          )}
 
                           {taskDivisionName ? (
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
@@ -1630,6 +1660,11 @@ export default function ScrumPlanning() {
                       </option>
                     ))}
                 </select>
+                {activeSprint && !taskForm.sprintId && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg p-2 mt-1.5 border border-amber-200">
+                    💡 <strong>Tips:</strong> Saat ini ada <strong>{activeSprint.name} (Aktif)</strong>. Jika ingin tugas ini langsung muncul di Progress Board sprint saat ini, pilih <strong>{activeSprint.name}</strong> di atas.
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-2.5 pt-2">

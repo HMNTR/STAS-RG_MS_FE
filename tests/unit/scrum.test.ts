@@ -177,3 +177,44 @@ test("END_SPRINT_CONFIRMATION_MESSAGE matches specification", () => {
     "Sprint akan masuk ke tahap Review. Summary, rapat, evaluasi anggota, dan keputusan task yang belum selesai akan diproses sebelum Sprint berikutnya dapat dimulai."
   );
 });
+
+test("filterTasksForBoard with boardSprintScope logic: shows active sprint only vs all project tasks", () => {
+  const activeSprintId = "sprint-1";
+  const tasks = [
+    { id: "task-1", sprintId: "sprint-1", title: "Active sprint task" },
+    { id: "task-2", sprintId: null, title: "Backlog task being worked on" },
+    { id: "task-3", sprintId: "sprint-2", title: "Other sprint task" },
+  ];
+
+  // When scope is active_sprint:
+  const activeSprintTasks = filterTasksForBoard(tasks, {
+    activeSprintId,
+  });
+  assert.equal(activeSprintTasks.length, 1);
+  assert.equal(activeSprintTasks[0].id, "task-1");
+
+  // When scope is all (effectiveActiveSprintId is null):
+  const allBoardTasks = filterTasksForBoard(tasks, {
+    activeSprintId: null,
+  });
+  assert.equal(allBoardTasks.length, 3);
+});
+
+test("unassignedActiveTasks identifies tasks in DOING/REVIEW outside active sprint", () => {
+  const activeSprint = { id: "sprint-1" };
+  const allTasks = [
+    { id: "t1", sprintId: "sprint-1", status: "DOING" },
+    { id: "t2", sprintId: null, status: "DOING" }, // Backlog task worked on by student
+    { id: "t3", sprintId: null, status: "TODO" },  // Normal backlog task
+    { id: "t4", sprintId: null, status: "REVIEW" },// Backlog task submitted for review
+    { id: "t5", sprintId: "sprint-2", status: "DOING" }, // Task in other sprint
+  ];
+
+  const unassignedActiveTasks = allTasks.filter(
+    (t) => (!t.sprintId || (activeSprint?.id && t.sprintId !== activeSprint.id)) && (t.status === "DOING" || t.status === "REVIEW")
+  );
+
+  assert.equal(unassignedActiveTasks.length, 3);
+  assert.deepEqual(unassignedActiveTasks.map((t) => t.id), ["t2", "t4", "t5"]);
+});
+

@@ -549,6 +549,7 @@ export function SharedBoardView({
   const [reviewSprint, setReviewSprint] = useState<any>(null);
   const [divisions, setDivisions] = useState<ProjectDivision[]>([]);
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>("all");
+  const [boardSprintScope, setBoardSprintScope] = useState<"active_sprint" | "all">("active_sprint");
   const [onlyMyTasks, setOnlyMyTasks] = useState(false);
   const [boardRepos, setBoardRepos] = useState<GitHubRepository[]>([]);
   const [boardReposLoading, setBoardReposLoading] = useState<boolean>(false);
@@ -829,9 +830,13 @@ export function SharedBoardView({
     ...(tasks.review || []),
     ...(tasks.done || [])
   ];
-  const scopedTasks = activeSprint?.id
-    ? allCurrentTasks.filter((t) => t.sprintId === activeSprint.id)
+  const effectiveActiveSprintId = boardSprintScope === "all" ? null : (activeSprint?.id || null);
+  const scopedTasks = effectiveActiveSprintId
+    ? allCurrentTasks.filter((t) => t.sprintId === effectiveActiveSprintId)
     : allCurrentTasks;
+  const unassignedActiveTasks = allCurrentTasks.filter(
+    (t) => (!t.sprintId || (activeSprint?.id && t.sprintId !== activeSprint.id)) && (t.status === "DOING" || t.status === "REVIEW")
+  );
   const divisionTabs = getDivisionTabs(scopedTasks, divisions);
   const boardPermissions = permissionsMap[activeId] || getDefaultBoardPermissions(currentUser?.role);
   const canManageCards = boardPermissions.canManageCards;
@@ -2161,6 +2166,21 @@ export function SharedBoardView({
                 >
                   {onlyMyTasks ? "✓ Menampilkan Tugas Saya" : "Filter: Tugas Saya Saja"}
                 </button>
+                <button
+                  onClick={() => setBoardSprintScope(boardSprintScope === "active_sprint" ? "all" : "active_sprint")}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                    boardSprintScope === "all"
+                      ? "bg-[#6C47FF] text-white border-[#6C47FF] shadow-sm"
+                      : "bg-slate-50 hover:bg-slate-100 text-muted-foreground border-border"
+                  }`}
+                  title={
+                    boardSprintScope === "all"
+                      ? "Sedang menampilkan seluruh tugas proyek (termasuk backlog). Klik untuk batasi ke Sprint Aktif saja."
+                      : "Klik untuk menampilkan semua tugas proyek termasuk backlog."
+                  }
+                >
+                  {boardSprintScope === "all" ? "✓ Menampilkan Semua Tugas" : "Tampilkan: Semua Tugas (Termasuk Backlog)"}
+                </button>
               </div>
             </div>
             );
@@ -2230,6 +2250,55 @@ export function SharedBoardView({
             </div>
           )}
 
+          {/* ── Warning Banner for Active Tasks Outside Active Sprint ── */}
+          {activeSprint && unassignedActiveTasks.length > 0 && boardSprintScope === "active_sprint" && (
+            <div className="bg-amber-50/90 border border-amber-300 rounded-[16px] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                  <AlertCircle size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-black text-amber-900 uppercase tracking-wide">
+                      Tugas Sedang Berjalan di Luar Sprint Aktif ({unassignedActiveTasks.length})
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-200 text-amber-800">
+                      Product Backlog
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-800/90 mt-0.5">
+                    Terdapat {unassignedActiveTasks.length} tugas yang sedang dikerjakan mahasiswa (status DOING/REVIEW), namun belum dimasukkan ke dalam <span className="font-semibold">{activeSprint.name}</span>.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => setBoardSprintScope("all")}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-sm"
+                >
+                  Tampilkan Semua Tugas di Board
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeSprint && boardSprintScope === "all" && (
+            <div className="bg-purple-50/80 border border-purple-200 rounded-[16px] px-4 py-2.5 shadow-sm flex items-center justify-between gap-3 text-purple-900">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold">Mode Tampilan:</span>
+                <span>Menampilkan seluruh tugas proyek (termasuk tugas Product Backlog).</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBoardSprintScope("active_sprint")}
+                className="px-3 py-1 rounded-lg text-xs font-black bg-white hover:bg-purple-100 text-purple-700 border border-purple-200 transition-all shrink-0"
+              >
+                Kembali ke Hanya Sprint Aktif
+              </button>
+            </div>
+          )}
+
           {/* ── Division Sub-tabs ── */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1 scrollbar-thin">
             {divisionTabs.map((tab) => {
@@ -2261,7 +2330,7 @@ export function SharedBoardView({
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 xl:gap-6 flex-1 min-h-[400px]">
             {columns.map((col) => {
               const colTasks = filterTasksForBoard(tasks[col.id] || [], {
-                activeSprintId: activeSprint?.id || null,
+                activeSprintId: effectiveActiveSprintId,
                 selectedDivisionId,
                 onlyMyTasks,
                 currentUserId: currentUser?.id,
@@ -2344,6 +2413,11 @@ export function SharedBoardView({
                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-0.5" title="Tingkat Kesulitan (Fibonacci Story Points)">
                                   <span>⚡</span>
                                   <span>{task.storyPoints} SP</span>
+                                </span>
+                              )}
+                              {activeSprint && (!task.sprintId || task.sprintId !== activeSprint.id) && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200" title="Tugas ini berada di Product Backlog (belum dimasukkan ke sprint aktif)">
+                                  Backlog
                                 </span>
                               )}
                             </div>
