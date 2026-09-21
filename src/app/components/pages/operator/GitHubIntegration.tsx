@@ -23,9 +23,10 @@ import {
   Edit3,
   Calendar,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
-import { apiGet, apiPost, apiPatch } from "../../../lib/api";
+import { apiGet, apiPost, apiPatch, apiDelete } from "../../../lib/api";
 import { OperatorLayout } from "../../templates/OperatorLayout";
 import { DosenLayout } from "../../templates/DosenLayout";
 import {
@@ -63,6 +64,22 @@ interface SprintItem {
   id: string;
   name: string;
   status: string;
+}
+
+interface RepositoryValidationResult {
+  valid: boolean;
+  alreadyRegistered?: boolean;
+  canRestore?: boolean;
+  repository: {
+    owner: string;
+    repo: string;
+    fullName: string;
+    githubRepositoryId: string | null;
+    githubInstallationId: string | null;
+    defaultBranch: string;
+    isPrivate: boolean;
+    htmlUrl: string | null;
+  };
 }
 
 export default function GitHubIntegration() {
@@ -107,6 +124,11 @@ export default function GitHubIntegration() {
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [editingRepo, setEditingRepo] = useState<GitHubRepository | null>(null);
   const [savingRepo, setSavingRepo] = useState<boolean>(false);
+  const [validatingRepo, setValidatingRepo] = useState<boolean>(false);
+  const [repoValidation, setRepoValidation] = useState<RepositoryValidationResult | null>(null);
+  const [repoValidationError, setRepoValidationError] = useState<string>("");
+  const [repoToRemove, setRepoToRemove] = useState<GitHubRepository | null>(null);
+  const [removingRepo, setRemovingRepo] = useState<boolean>(false);
 
   // Status Apply confirmation modal
   const [confirmApply, setConfirmApply] = useState<{
@@ -264,6 +286,8 @@ export default function GitHubIntegration() {
       isPrivate: false,
       isActive: true,
     });
+    setRepoValidation(null);
+    setRepoValidationError("");
     setShowAddModal(true);
     setError("");
   };
@@ -284,31 +308,78 @@ export default function GitHubIntegration() {
     setError("");
   };
 
+  // Validate repository against GitHub App before create
+  const handleValidateRepo = async () => {
+    if (!repoForm.owner.trim() || !repoForm.repo.trim()) {
+      setRepoValidation(null);
+      setRepoValidationError("Owner dan Nama Repository wajib diisi sebelum pengecekan.");
+      return;
+    }
+
+    try {
+      setValidatingRepo(true);
+      setRepoValidation(null);
+      setRepoValidationError("");
+      const result = await apiPost<RepositoryValidationResult>(
+        `/research/${selectedProjectId}/repositories/validate`,
+        {
+          owner: repoForm.owner.trim(),
+          repo: repoForm.repo.trim(),
+          githubInstallationId: repoForm.githubInstallationId.trim() || null,
+        }
+      );
+
+      setRepoValidation(result);
+      setRepoForm((current) => ({
+        ...current,
+        owner: result.repository.owner,
+        repo: result.repository.repo,
+        githubRepositoryId: result.repository.githubRepositoryId || "",
+        githubInstallationId: result.repository.githubInstallationId || "",
+        defaultBranch: result.repository.defaultBranch || "main",
+        isPrivate: result.repository.isPrivate,
+      }));
+    } catch (err: any) {
+      setRepoValidation(null);
+      setRepoValidationError(formatGitHubError(err));
+    } finally {
+      setValidatingRepo(false);
+    }
+  };
+
   // Submit Add Repo
   const handleCreateRepo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!repoForm.owner.trim() || !repoForm.repo.trim()) {
-      setError("Owner dan Nama Repository wajib diisi.");
+    if (!repoValidation?.valid) {
+      setRepoValidationError("Cek repository terlebih dahulu sebelum menambahkannya ke riset.");
       return;
     }
+    if (repoValidation.alreadyRegistered) {
+      setRepoValidationError("Repository sudah terdaftar pada project ini.");
+      return;
+    }
+
     try {
       setSavingRepo(true);
       setError("");
+      setRepoValidationError("");
       await apiPost(`/research/${selectedProjectId}/repositories`, {
         owner: repoForm.owner.trim(),
         repo: repoForm.repo.trim(),
         divisionId: repoForm.divisionId || null,
-        defaultBranch: repoForm.defaultBranch.trim() || "main",
-        githubRepositoryId: repoForm.githubRepositoryId.trim() || null,
         githubInstallationId: repoForm.githubInstallationId.trim() || null,
-        isPrivate: repoForm.isPrivate,
       });
       setShowAddModal(false);
-      setSuccessMessage("Repository berhasil ditambahkan ke project.");
+      setRepoValidation(null);
+      setSuccessMessage(
+        repoValidation.canRestore
+          ? "Repository berhasil dipulihkan dan dihubungkan kembali ke project."
+          : "Repository berhasil ditambahkan ke project."
+      );
       setTimeout(() => setSuccessMessage(""), 3000);
       await loadProjectData(selectedProjectId);
     } catch (err: any) {
-      setError(formatGitHubError(err));
+      setRepoValidationError(formatGitHubError(err));
     } finally {
       setSavingRepo(false);
     }
@@ -351,6 +422,27 @@ export default function GitHubIntegration() {
       await loadProjectData(selectedProjectId);
     } catch (err: any) {
       setError(formatGitHubError(err));
+    }
+  };
+
+  // Soft-remove repository from the selected research only
+  const handleRemoveRepo = async () => {
+    if (!repoToRemove) return;
+    try {
+      setRemovingRepo(true);
+      setError("");
+      await apiDelete(`/research/${selectedProjectId}/repositories/${repoToRemove.id}`);
+      if (selectedRepoFilter === repoToRemove.id) {
+        setSelectedRepoFilter("");
+      }
+      setRepoToRemove(null);
+      setSuccessMessage("Repository berhasil dihapus dari riset. Riwayat aktivitas GitHub tetap dipertahankan.");
+      setTimeout(() => setSuccessMessage(""), 3500);
+      await loadProjectData(selectedProjectId);
+    } catch (err: any) {
+      setError(formatGitHubError(err));
+    } finally {
+      setRemovingRepo(false);
     }
   };
 
@@ -658,6 +750,14 @@ export default function GitHubIntegration() {
                         >
                           {repo.isActive ? "Nonaktifkan" : "Aktifkan"}
                         </button>
+                        <button
+                          onClick={() => setRepoToRemove(repo)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold border border-red-200 text-red-700 hover:bg-red-50 transition-colors flex items-center gap-1"
+                          title="Hapus repository dari riset"
+                        >
+                          <Trash2 size={13} />
+                          <span>Hapus dari Riset</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -933,9 +1033,13 @@ export default function GitHubIntegration() {
                   <input
                     type="text"
                     required
-                    placeholder="Contoh: stas-rg atau organization"
+                    placeholder="Contoh: HMNTR"
                     value={repoForm.owner}
-                    onChange={(e) => setRepoForm({ ...repoForm, owner: e.target.value })}
+                    onChange={(e) => {
+                      setRepoForm({ ...repoForm, owner: e.target.value });
+                      setRepoValidation(null);
+                      setRepoValidationError("");
+                    }}
                     className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
@@ -947,12 +1051,103 @@ export default function GitHubIntegration() {
                   <input
                     type="text"
                     required
-                    placeholder="Contoh: orbit-api"
+                    placeholder="Contoh: STAS-RG_MS_FE"
                     value={repoForm.repo}
-                    onChange={(e) => setRepoForm({ ...repoForm, repo: e.target.value })}
+                    onChange={(e) => {
+                      setRepoForm({ ...repoForm, repo: e.target.value });
+                      setRepoValidation(null);
+                      setRepoValidationError("");
+                    }}
                     className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Installation ID <span className="text-slate-400 font-medium">(Opsional)</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="Kosongkan jika ingin dideteksi otomatis"
+                      value={repoForm.githubInstallationId}
+                      onChange={(e) => {
+                        setRepoForm({ ...repoForm, githubInstallationId: e.target.value });
+                        setRepoValidation(null);
+                        setRepoValidationError("");
+                      }}
+                      className="flex-1 min-w-0 text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleValidateRepo}
+                      disabled={validatingRepo || !repoForm.owner.trim() || !repoForm.repo.trim()}
+                      className="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-xs font-bold hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    >
+                      <Search size={14} className={validatingRepo ? "animate-pulse" : ""} />
+                      <span>{validatingRepo ? "Mengecek..." : "Cek Repository"}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Sistem akan memverifikasi repository dan akses GitHub App langsung ke GitHub.
+                  </p>
+                </div>
+
+                {repoValidationError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700 flex items-start gap-2">
+                    <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                    <span>{repoValidationError}</span>
+                  </div>
+                )}
+
+                {repoValidation?.valid && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-black text-emerald-800">Repository terverifikasi</p>
+                        <p className="text-xs text-emerald-700">{repoValidation.repository.fullName}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="rounded-lg bg-white/70 border border-emerald-100 p-2">
+                        <span className="text-slate-500 block">Repository ID</span>
+                        <strong className="text-slate-800 break-all">
+                          {repoValidation.repository.githubRepositoryId || "-"}
+                        </strong>
+                      </div>
+                      <div className="rounded-lg bg-white/70 border border-emerald-100 p-2">
+                        <span className="text-slate-500 block">Default Branch</span>
+                        <strong className="text-slate-800">{repoValidation.repository.defaultBranch}</strong>
+                      </div>
+                      <div className="rounded-lg bg-white/70 border border-emerald-100 p-2">
+                        <span className="text-slate-500 block">Visibility</span>
+                        <strong className="text-slate-800">
+                          {repoValidation.repository.isPrivate ? "Private" : "Public"}
+                        </strong>
+                      </div>
+                      <div className="rounded-lg bg-white/70 border border-emerald-100 p-2">
+                        <span className="text-slate-500 block">Installation ID</span>
+                        <strong className="text-slate-800 break-all">
+                          {repoValidation.repository.githubInstallationId || "-"}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {repoValidation.alreadyRegistered && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                        Repository ini sudah terdaftar pada project yang dipilih.
+                      </div>
+                    )}
+                    {repoValidation.canRestore && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-800">
+                        Repository ini pernah dihapus dari riset. Menambahkannya kembali akan memulihkan koneksi dan mempertahankan riwayat lama.
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
@@ -971,77 +1166,37 @@ export default function GitHubIntegration() {
                     ))}
                   </select>
                   <p className="text-[11px] text-muted-foreground mt-1">
-                    Opsional. Repository tanpa mapping Divisi dapat digunakan lintas divisi dalam Project.
+                    Repository tanpa mapping Divisi dapat digunakan lintas divisi dalam Project.
                   </p>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Default Branch
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="main"
-                    value={repoForm.defaultBranch}
-                    onChange={(e) => setRepoForm({ ...repoForm, defaultBranch: e.target.value })}
-                    className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      GitHub Repo ID (Opsional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Contoh: 12345678"
-                      value={repoForm.githubRepositoryId}
-                      onChange={(e) => setRepoForm({ ...repoForm, githubRepositoryId: e.target.value })}
-                      className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Installation ID (Opsional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Contoh: 987654"
-                      value={repoForm.githubInstallationId}
-                      onChange={(e) => setRepoForm({ ...repoForm, githubInstallationId: e.target.value })}
-                      className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="isPrivateCheck"
-                    checked={repoForm.isPrivate}
-                    onChange={(e) => setRepoForm({ ...repoForm, isPrivate: e.target.checked })}
-                    className="rounded border-slate-300 text-primary focus:ring-primary/20"
-                  />
-                  <label htmlFor="isPrivateCheck" className="text-xs font-medium text-slate-700 cursor-pointer">
-                    Repository Private
-                  </label>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
                   <button
                     type="button"
-                    onClick={() => setShowAddModal(false)}
+                    onClick={() => {
+                      setShowAddModal(false);
+                      setRepoValidation(null);
+                      setRepoValidationError("");
+                    }}
                     className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
-                    disabled={savingRepo}
-                    className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
+                    disabled={
+                      savingRepo ||
+                      validatingRepo ||
+                      !repoValidation?.valid ||
+                      repoValidation?.alreadyRegistered === true
+                    }
+                    className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {savingRepo ? "Menyimpan..." : "Simpan Repository"}
+                    {savingRepo
+                      ? "Menyimpan..."
+                      : repoValidation?.canRestore
+                        ? "Pulihkan Repository"
+                        : "Tambahkan Repository"}
                   </button>
                 </div>
               </form>
@@ -1151,6 +1306,46 @@ export default function GitHubIntegration() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Remove Repository Confirmation Modal */}
+        {repoToRemove && (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+              <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+                <Trash2 size={22} />
+              </div>
+              <div className="text-center">
+                <h3 className="text-base font-black text-foreground mb-1">
+                  Hapus repository dari riset?
+                </h3>
+                <p className="text-sm font-bold text-slate-800">{repoToRemove.fullName}</p>
+                <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                  Repository tidak akan lagi terhubung dengan riset ini. Repository asli di GitHub,
+                  instalasi GitHub App, dan riwayat aktivitas development yang sudah tercatat tidak akan dihapus.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRepoToRemove(null)}
+                  disabled={removingRepo}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemoveRepo}
+                  disabled={removingRepo}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {removingRepo ? "Menghapus..." : "Hapus dari Riset"}
+                </button>
+              </div>
             </div>
           </div>
         )}
