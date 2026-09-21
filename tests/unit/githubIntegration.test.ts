@@ -264,6 +264,25 @@ test("16. formatGitHubError translates business error codes", () => {
   );
 });
 
+test("16b. repository validation errors are translated from ApiError body codes", () => {
+  assert.equal(
+    formatGitHubError({ body: { code: "SCRUM_GITHUB_NOT_CONFIGURED" } }),
+    "GitHub App belum dikonfigurasi pada server."
+  );
+  assert.equal(
+    formatGitHubError({ body: { code: "SCRUM_GITHUB_INSTALLATION_MISMATCH" } }),
+    "Installation ID tidak sesuai dengan GitHub App installation repository ini."
+  );
+  assert.equal(
+    formatGitHubError({ body: { code: "SCRUM_GITHUB_REPOSITORY_NOT_ACCESSIBLE" } }),
+    "Repository tidak ditemukan atau GitHub App STAS-RG Scrum belum memiliki akses ke repository tersebut."
+  );
+  assert.equal(
+    formatGitHubError({ body: { code: "SCRUM_GITHUB_API_UNAVAILABLE" } }),
+    "GitHub API tidak dapat memvalidasi repository saat ini. Silakan coba kembali."
+  );
+});
+
 test("17. getResearchProjectsEndpoint resolves /research for operator and never /research/projects", () => {
   const operatorEndpoint = getResearchProjectsEndpoint(false);
   assert.equal(operatorEndpoint, "/research");
@@ -387,6 +406,37 @@ test("22. Progress Board repository summary renders multiple repositories, activ
   assert.ok(
     content.includes("Default branch:"),
     "SharedBoardView must display default branch"
+  );
+});
+
+test("22b. GitHubIntegration requires validation before create and supports soft remove", () => {
+  const rootDir = process.cwd();
+  const pagePath = path.join(rootDir, "src/app/components/pages/operator/GitHubIntegration.tsx");
+  const content = fs.readFileSync(pagePath, "utf-8");
+
+  assert.ok(
+    content.includes("/repositories/validate"),
+    "Add Repository flow must call the backend validation endpoint"
+  );
+  assert.ok(
+    content.includes("Cek Repository"),
+    "Add Repository modal must expose an explicit repository validation action"
+  );
+  assert.ok(
+    content.includes("Repository terverifikasi"),
+    "Validated GitHub metadata must be presented to the user"
+  );
+  assert.ok(
+    content.includes("apiDelete"),
+    "GitHubIntegration must use DELETE for repository soft removal"
+  );
+  assert.ok(
+    content.includes("Hapus dari Riset"),
+    "Repository management must expose the remove-from-research action"
+  );
+  assert.ok(
+    content.includes("Riwayat aktivitas GitHub tetap dipertahankan"),
+    "Soft-remove success feedback must communicate historical preservation"
   );
 });
 
