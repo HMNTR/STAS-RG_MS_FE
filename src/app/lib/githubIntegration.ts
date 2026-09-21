@@ -405,7 +405,7 @@ export function canApplySuggestedStatus(params: {
  * Translates backend error codes and messages into clear Indonesian user feedback.
  */
 export function formatGitHubError(error: any): string {
-  const code = error?.code || error?.response?.data?.code;
+  const code = error?.code || error?.body?.code || error?.response?.data?.code;
   const message = error?.message || error?.response?.data?.message;
 
   switch (code) {
