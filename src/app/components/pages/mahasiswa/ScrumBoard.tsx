@@ -29,6 +29,7 @@ import {
   normalizeDivisionItem,
   normalizeTaskDivisionFields
 } from "../../../lib/scrum";
+import { RichTaskDescription } from "../../molecules/RichTaskDescription";
 
 interface ScrumTask {
   id: string;
@@ -611,8 +612,8 @@ export default function ScrumBoard() {
                   <label className="text-xs font-black text-muted-foreground block mb-1">
                     Instruksi Tugas dari Admin
                   </label>
-                  <div className="p-3 bg-slate-50 border border-border rounded-xl text-xs text-foreground whitespace-pre-wrap leading-relaxed">
-                    {selectedTask.description}
+                  <div className="p-4 bg-slate-50 border border-border rounded-xl">
+                    <RichTaskDescription content={selectedTask.description} />
                   </div>
                 </div>
               ) : null}

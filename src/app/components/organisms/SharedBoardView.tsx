@@ -33,6 +33,8 @@ import {
   normalizeDivisionItem
 } from "../../lib/scrum";
 import { getSprintTimingState } from "../../lib/sprintDuration";
+import { RichTaskDescription } from "../molecules/RichTaskDescription";
+import { getTaskDescriptionPreview } from "../../lib/taskDescription";
 import {
   GitHubRepository,
   TaskRepositoryLink,
@@ -2380,11 +2382,14 @@ export function SharedBoardView({
                             </div>
                           )}
                           {task.statusText && (
-                            <div className="flex items-center gap-1.5 mb-3">
-                              {col.id === "done" && <Check size={12} className="text-emerald-500" strokeWidth={3} />}
-                              <span className={`text-[11px] font-bold ${col.id === "done" ? "text-emerald-500" : "text-muted-foreground"}`}>
-                                {task.statusText}
-                              </span>
+                            <div className="mb-3">
+                              <p
+                                className={`text-[11px] text-muted-foreground line-clamp-3 leading-relaxed whitespace-pre-line ${
+                                  col.id === "done" ? "line-through text-slate-400" : ""
+                                }`}
+                              >
+                                {getTaskDescriptionPreview(task.statusText)}
+                              </p>
                             </div>
                           )}
                           {task.progress !== undefined && (
@@ -2797,8 +2802,8 @@ export function SharedBoardView({
                   </div>
                   <div className="mb-8">
                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-3">Deskripsi Tugas</span>
-                    <div className="text-sm text-foreground leading-relaxed space-y-3 bg-white p-4 rounded-xl border border-border shadow-sm">
-                      <p>{selectedTask.statusText || "Detail tugas belum disediakan oleh API."}</p>
+                    <div className="bg-white p-5 rounded-xl border border-border shadow-sm">
+                      <RichTaskDescription content={selectedTask.description || selectedTask.statusText || ""} />
                     </div>
                   </div>
                   <div>
