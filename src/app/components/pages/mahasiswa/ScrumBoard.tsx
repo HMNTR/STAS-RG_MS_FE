@@ -21,7 +21,7 @@ import {
   Sparkles,
   X
 } from "lucide-react";
-import { apiGet, apiPatch, apiPost } from "../../../lib/api";
+import { apiGet, apiPatch, apiPost, resolveApiAssetUrl } from "../../../lib/api";
 import { formatDateReadable } from "../../../lib/date";
 import {
   ProjectDivision,
@@ -679,21 +679,25 @@ export default function ScrumBoard() {
                       Belum ada lampiran bukti. Klik tombol "Unggah Bukti" untuk menambahkan laporan atau screenshot.
                     </div>
                   ) : (
-                    selectedTask.attachments.map((at) => (
-                      <a
-                        key={at.id}
-                        href={at.file_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-2.5 bg-slate-50 border border-border rounded-xl flex items-center justify-between hover:bg-slate-100 transition-colors group"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Paperclip size={14} className="text-primary shrink-0" />
-                          <span className="text-xs font-bold text-foreground truncate">{at.file_name}</span>
-                        </div>
-                        <ExternalLink size={14} className="text-muted-foreground group-hover:text-foreground shrink-0" />
-                      </a>
-                    ))
+                    selectedTask.attachments.map((at) => {
+                      const fileUrl = resolveApiAssetUrl(at.file_url || at.fileUrl) || at.file_url || at.fileUrl || "";
+                      return (
+                        <a
+                          key={at.id}
+                          href={fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download={at.file_name || at.fileName || undefined}
+                          className="p-2.5 bg-slate-50 border border-border rounded-xl flex items-center justify-between hover:bg-slate-100 transition-colors group"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Paperclip size={14} className="text-primary shrink-0" />
+                            <span className="text-xs font-bold text-foreground truncate">{at.file_name || at.fileName}</span>
+                          </div>
+                          <ExternalLink size={14} className="text-muted-foreground group-hover:text-foreground shrink-0" />
+                        </a>
+                      );
+                    })
                   )}
                 </div>
               </div>

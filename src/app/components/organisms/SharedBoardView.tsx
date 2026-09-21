@@ -14,7 +14,7 @@ import {
   AlertCircle, Lock
 } from "lucide-react";
 import { useConfirmDialog } from "../molecules/ConfirmDialog";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getStoredUser } from "../../lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getStoredUser, resolveApiAssetUrl } from "../../lib/api";
 import { formatDateReadable } from "../../lib/date";
 import { ProjectMembersView } from "./ProjectMembersView";
 import {
@@ -243,15 +243,32 @@ function formatBoardDateRange(start?: string, end?: string) {
 }
 
 function normalizeTaskAttachment(item: any, index: number): TaskAttachment {
-  const name = item?.name || item?.filename || item?.file_name || item?.title || item?.url || `Lampiran ${index + 1}`;
-  const sizeValue = Number(item?.size || item?.bytes || item?.file_size || 0);
-  const uploadedAt = item?.uploadedAt || item?.createdAt || new Date().toISOString();
+  if (typeof item === "string") {
+    const rawUrl = item.trim();
+    const resolvedUrl = resolveApiAssetUrl(rawUrl) || rawUrl;
+    const name = rawUrl.split("/").pop() || `Lampiran ${index + 1}`;
+    return {
+      id: `attachment-${index}`,
+      name,
+      sizeLabel: "-",
+      uploadedAt: new Date().toISOString(),
+      url: resolvedUrl,
+      type: rawUrl.startsWith("http") && !rawUrl.includes("/uploads/") ? "link" : "file",
+      local: false
+    };
+  }
+
+  const name = item?.name || item?.filename || item?.file_name || item?.fileName || item?.title || item?.url || `Lampiran ${index + 1}`;
+  const sizeValue = Number(item?.size || item?.bytes || item?.file_size || item?.fileSize || 0);
+  const uploadedAt = item?.uploadedAt || item?.createdAt || item?.created_at || new Date().toISOString();
+  const rawUrl = item?.url || item?.href || item?.file_url || item?.fileUrl || item?.fileDataUrl || "";
+  const resolvedUrl = resolveApiAssetUrl(rawUrl) || rawUrl;
   return {
     id: String(item?.id || `attachment-${index}`),
     name,
     sizeLabel: item?.sizeLabel || formatFileSize(sizeValue),
     uploadedAt,
-    url: item?.url || item?.href || item?.file_url || "",
+    url: resolvedUrl,
     type: item?.type === "link" ? "link" : "file",
     local: Boolean(item?.local)
   };
@@ -455,12 +472,13 @@ function MilestoneBanner({
 }
 
 function BoardDocumentLink({ label, url }: { label: string; url?: string }) {
+  const resolvedUrl = resolveApiAssetUrl(url) || url;
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-xl border border-[#D8F5D0] bg-white px-3 py-2 shadow-sm">
       <span className="text-[10px] font-black uppercase tracking-wider text-[#5CC444]">{label}</span>
-      {url ? (
+      {resolvedUrl ? (
         <a
-          href={url}
+          href={resolvedUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex min-w-0 items-center gap-1.5 text-xs font-bold text-[#0AB600] hover:underline"
@@ -2086,7 +2104,7 @@ export function SharedBoardView({
                 </div>
               ) : project.attachment_link ? (
                 <a
-                  href={project.attachment_link}
+                  href={resolveApiAssetUrl(project.attachment_link) || project.attachment_link}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 px-3 py-2 bg-white border border-[#D8F5D0] rounded-lg text-xs text-[#0AB600] hover:bg-[#F0FFF0] transition-all break-all"
@@ -2418,8 +2436,9 @@ export function SharedBoardView({
                                 <a
                                   href={attachment.url}
                                   target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                                  rel="noopener noreferrer"
+                                  download={attachment.name || undefined}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-white border border-border px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors shadow-sm"
                                 >
                                   <Download size={12} /> Buka
                                 </a>
@@ -2754,6 +2773,32 @@ export function SharedBoardView({
                         </button>
                       )}
                     </div>
+                    {taskAttachments.length > 0 && (
+                      <div className="mb-3 flex flex-col gap-2">
+                        {taskAttachments.map((att) => (
+                          <div key={att.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-slate-50 px-3 py-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <FileText size={15} className="text-emerald-600 shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-foreground truncate">{att.name}</p>
+                                <p className="text-[10px] text-muted-foreground">{att.sizeLabel}</p>
+                              </div>
+                            </div>
+                            {att.url && (
+                              <a
+                                href={att.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                download={att.name || undefined}
+                                className="inline-flex items-center gap-1 rounded-lg bg-white border border-border px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 transition-colors shadow-sm shrink-0"
+                              >
+                                <Download size={11} /> Buka
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="space-y-2">
                       {taskSubtasks.length === 0 && (
                         <div className="rounded-xl border border-dashed border-border bg-white px-4 py-3 text-sm text-muted-foreground">
