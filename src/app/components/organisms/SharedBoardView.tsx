@@ -23,7 +23,8 @@ import {
   MAHASISWA_RESEARCH_ROLES,
   normalizeResearchRoleForMemberType,
   getCombinedMemberRoles,
-  loadStoredDivisionRoles
+  loadStoredDivisionRoles,
+  isMahasiswaKetuaRiset
 } from "../../lib/researchRoles";
 import {
   ProjectDivision,
@@ -177,15 +178,27 @@ function getDefaultBoardPermissions(role?: string | null): BoardPermissions {
   };
 }
 
-function normalizeBoardPermissions(value: any, fallbackRole?: string | null): BoardPermissions {
+function normalizeBoardPermissions(
+  value: any,
+  fallbackRole?: string | null,
+  isLeaderMemberFallback?: boolean
+): BoardPermissions {
   const fallback = getDefaultBoardPermissions(fallbackRole);
-  if (!value || typeof value !== "object") return fallback;
+  const isLeader = Boolean(value?.isLeaderMember ?? isLeaderMemberFallback ?? fallback.isLeaderMember);
+  if (!value || typeof value !== "object") {
+    return {
+      ...fallback,
+      isLeaderMember: isLeader,
+      canManageCards: isLeader || fallback.canManageCards,
+    };
+  }
   const role = String(value.role || fallback.role).toLowerCase();
+  const canManageCards = Boolean(value.canManageCards ?? (isLeader || fallback.canManageCards));
 
   return {
     role: ["operator", "dosen", "mahasiswa"].includes(role) ? role as BoardPermissions["role"] : fallback.role,
-    isLeaderMember: Boolean(value.isLeaderMember ?? fallback.isLeaderMember),
-    canManageCards: Boolean(value.canManageCards ?? fallback.canManageCards),
+    isLeaderMember: isLeader,
+    canManageCards,
     canFillExistingCards: Boolean(value.canFillExistingCards ?? fallback.canFillExistingCards),
   };
 }
@@ -729,9 +742,12 @@ export function SharedBoardView({
         });
 
         setTaskAttachmentsMap((prev) => ({ ...prev, ...nextAttachmentMap }));
+        const currentMembers = teamMembersMap[activeId] || [];
+        const isLeaderFallback = isMahasiswaKetuaRiset(currentUser, currentMembers);
+
         setPermissionsMap((prev) => ({
           ...prev,
-          [activeId]: normalizeBoardPermissions(data?.permissions, currentUser?.role)
+          [activeId]: normalizeBoardPermissions(data?.permissions, currentUser?.role, isLeaderFallback)
         }));
 
         setTasksMap((prev) => ({
@@ -843,6 +859,7 @@ export function SharedBoardView({
   const boardPermissions = permissionsMap[activeId] || getDefaultBoardPermissions(currentUser?.role);
   const canManageCards = boardPermissions.canManageCards;
   const canFillExistingCards = canManageCards || boardPermissions.canFillExistingCards;
+  const canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen";
 
   // Initialize attachment link when project changes
   React.useEffect(() => {
@@ -1954,23 +1971,23 @@ export function SharedBoardView({
               </div>
             </div>
             <div className="flex items-center gap-3">
+              {canManageMetadata && (
+                <button
+                  title="Edit Board Settings"
+                  onClick={openEditBoardModal}
+                  className={`flex items-center justify-center bg-white border border-border rounded-xl w-10 h-10 text-slate-500 ${accentHover} hover:bg-slate-50 hover:border-[#0AB600]/30 transition-all shadow-sm`}
+                >
+                  <Edit2 size={16} strokeWidth={2.5} />
+                </button>
+              )}
+              {canManageMetadata && canManageCards && <div className="w-px h-6 bg-border mx-1" />}
               {canManageCards ? (
-                <>
-                  <button
-                    title="Edit Board Settings"
-                    onClick={openEditBoardModal}
-                    className={`flex items-center justify-center bg-white border border-border rounded-xl w-10 h-10 text-slate-500 ${accentHover} hover:bg-slate-50 hover:border-[#0AB600]/30 transition-all shadow-sm`}
-                  >
-                    <Edit2 size={16} strokeWidth={2.5} />
-                  </button>
-                  <div className="w-px h-6 bg-border mx-1" />
-                  <button
-                    onClick={openAddTaskModal}
-                    className={`${accentBg} hover:opacity-90 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all flex items-center gap-2`}
-                  >
-                    <Plus size={16} strokeWidth={3} /> Tambah Tugas
-                  </button>
-                </>
+                <button
+                  onClick={openAddTaskModal}
+                  className={`${accentBg} hover:opacity-90 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all flex items-center gap-2`}
+                >
+                  <Plus size={16} strokeWidth={3} /> Tambah Tugas
+                </button>
               ) : (
                 <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-500 shadow-sm">
                   {canFillExistingCards ? "Akses isi kartu" : "Akses lihat"}
@@ -1987,7 +2004,7 @@ export function SharedBoardView({
                 <div className="flex items-center gap-2">
                   <span>📌</span>
                   <h2 className={`text-lg font-bold ${accentText}`}>{project.shortTitle}</h2>
-                  {canManageCards && (
+                  {canManageMetadata && (
                     <button
                       onClick={openEditBoardModal}
                       className="opacity-0 group-hover:opacity-100 p-1.5 bg-white/60 border border-[#D8F5D0] text-[#4AB834] hover:text-[#0AB600] hover:bg-white rounded-lg transition-all shadow-sm"
@@ -2033,26 +2050,28 @@ export function SharedBoardView({
                 <span className="text-[10px] font-black text-[#5CC444] uppercase tracking-wider">
                   Milestone Progress — {milestones.filter(m => m.done).length}/{milestones.length} Selesai
                 </span>
-                <button
-                  onClick={() => setIsMilestoneOpen(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#D8F5D0] hover:border-[#0AB600] hover:bg-[#F0FFF0] rounded-lg text-[10px] font-black text-[#4AB834] hover:text-[#0AB600] transition-all shadow-sm"
-                >
-                  <Edit2 size={10} strokeWidth={3} /> Kelola Milestone
-                </button>
+                {canManageMetadata && (
+                  <button
+                    onClick={() => setIsMilestoneOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#D8F5D0] hover:border-[#0AB600] hover:bg-[#F0FFF0] rounded-lg text-[10px] font-black text-[#4AB834] hover:text-[#0AB600] transition-all shadow-sm"
+                  >
+                    <Edit2 size={10} strokeWidth={3} /> Kelola Milestone
+                  </button>
+                )}
               </div>
               <MilestoneBanner
                 milestones={milestones}
                 progressColor={project.progressColor}
                 onToggle={toggleMilestone}
                 onManage={() => setIsMilestoneOpen(true)}
-                editable={canManageCards}
+                editable={canManageMetadata}
               />
             </div>
 
             {/* Team members */}
             <div className="px-5 py-4">
               <span className="text-[10px] font-black text-[#5CC444] uppercase tracking-wider block mb-3">Anggota Tim</span>
-              <ProjectMembersView members={teamMembers as any} />
+              <ProjectMembersView members={teamMembers as any} editable={canManageMetadata} />
             </div>
 
             {/* Research documents */}
@@ -2085,12 +2104,14 @@ export function SharedBoardView({
             <div className="px-5 py-4 border-t border-[#D8F5D0]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] font-black text-[#5CC444] uppercase tracking-wider">Lampiran</span>
-                <button
-                  onClick={() => { setAttachmentLink(project.attachment_link || ""); setIsEditingAttachment(!isEditingAttachment); }}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#D8F5D0] hover:border-[#0AB600] hover:bg-[#F0FFF0] rounded-lg text-[10px] font-black text-[#4AB834] hover:text-[#0AB600] transition-all shadow-sm"
-                >
-                  <LinkIcon size={10} strokeWidth={3} /> {isEditingAttachment ? "Batal" : "Edit"}
-                </button>
+                {canManageMetadata && (
+                  <button
+                    onClick={() => { setAttachmentLink(project.attachment_link || ""); setIsEditingAttachment(!isEditingAttachment); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#D8F5D0] hover:border-[#0AB600] hover:bg-[#F0FFF0] rounded-lg text-[10px] font-black text-[#4AB834] hover:text-[#0AB600] transition-all shadow-sm"
+                  >
+                    <LinkIcon size={10} strokeWidth={3} /> {isEditingAttachment ? "Batal" : "Edit"}
+                  </button>
+                )}
               </div>
               {isEditingAttachment ? (
                 <div className="flex gap-2">

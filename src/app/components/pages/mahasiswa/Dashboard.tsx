@@ -535,7 +535,7 @@ export default function Dashboard() {
         </Link>
 
         {/* ── Main Grid 8-4 ── */}
-        {(todayPicket || todayPicketHoliday) && (
+        {!isAlumni && (todayPicket || todayPicketHoliday) && (
           <Link
             to="/picket"
             className={`rounded-[14px] border p-4 shadow-sm transition-colors ${todayPicketHoliday || todayPicket?.isHoliday || todayPicket?.isExempt ? "border-violet-200 bg-violet-50 hover:bg-violet-100" : "border-emerald-200 bg-emerald-50 hover:bg-emerald-100"}`}

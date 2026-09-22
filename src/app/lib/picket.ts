@@ -131,6 +131,27 @@ function bool(value: unknown, fallback = false) {
   return Boolean(value);
 }
 
+export function isAlumniStudent(student: any): boolean {
+  if (!student) return false;
+  if (student.is_alumni === true || student.isAlumni === true) return true;
+  const rawStatus =
+    student.status ||
+    student.student_status ||
+    student.studentStatus ||
+    student.user_status ||
+    student.userStatus ||
+    student.role_status ||
+    student.roleStatus ||
+    "";
+  const status = String(rawStatus).trim().toLowerCase();
+  return status === "alumni" || status === "lulus";
+}
+
+export function filterActivePicketStudents<T>(students: T[]): T[] {
+  if (!Array.isArray(students)) return [];
+  return students.filter((student) => !isAlumniStudent(student));
+}
+
 export function validatePicketPhoto(file: File) {
   const extension = String(file.name || "").split(".").pop()?.toLowerCase() || "";
   const inferredType = PICKET_PHOTO_EXTENSION_TYPES[extension] || "";
@@ -433,10 +454,11 @@ export function mapPicketTodayAssignment(value: any): PicketAssignment | null {
     raw?.autoCompletedByWfh
   );
   if (!hasAssignmentIdentity) return null;
+  const isAlumni = isAlumniStudent(value) || isAlumniStudent(raw) || isAlumniStudent(raw?.student) || isAlumniStudent(value?.student);
   return mapPicketAssignment({
     ...raw,
     isHoliday: raw?.isHoliday ?? raw?.is_holiday ?? value?.isHoliday ?? value?.is_holiday,
-    isExempt: raw?.isExempt ?? raw?.is_exempt ?? value?.isExempt ?? value?.is_exempt,
+    isExempt: Boolean((raw?.isExempt ?? raw?.is_exempt ?? value?.isExempt ?? value?.is_exempt) || isAlumni),
     holiday: raw?.holiday || value?.holiday || null,
   });
 }

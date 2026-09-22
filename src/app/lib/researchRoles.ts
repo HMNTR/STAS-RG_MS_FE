@@ -193,3 +193,34 @@ export function saveStoredDivisionRoles(projectId: string, divisionId: string, r
   } catch {}
 }
 
+export function isMahasiswaKetuaRiset(user: any, members?: any[]): boolean {
+  if (!user) return false;
+  const userRole = String(user.role || "").toLowerCase();
+
+  // If user has a direct peran/role indicating student leader
+  const directPeran = String(user.peran || user.my_peran || user.researchRole || "").trim().toLowerCase();
+  if (userRole === "mahasiswa" && (directPeran === MAHASISWA_LEADER_ROLE.toLowerCase() || directPeran.includes("ketua"))) {
+    return true;
+  }
+
+  // Check against project member list
+  if (Array.isArray(members) && members.length > 0) {
+    const currentUserId = String(user.id || user.userId || "").trim();
+    const myMember = members.find((m: any) => {
+      const mUserId = String(m.user_id || m.userId || m.id || "").trim();
+      return Boolean(currentUserId && mUserId === currentUserId);
+    });
+
+    if (myMember) {
+      const memberRole = String(myMember.role || myMember.peran || "").trim().toLowerCase();
+      const memberType = String(myMember.memberType || myMember.member_type || "").trim().toLowerCase();
+      const isStudent = memberType === "mahasiswa" || userRole === "mahasiswa";
+      if (isStudent && (memberRole === MAHASISWA_LEADER_ROLE.toLowerCase() || memberRole.includes("ketua"))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+

@@ -20,6 +20,7 @@ import {
   hasPicketPhotoSubmission,
   isPicketAssignmentSubmitted,
   isPicketHolidayResponse,
+  isAlumniStudent,
   mapPicketAssignment,
   mapPicketHoliday,
   mapPicketTodayAssignment,
@@ -48,6 +49,7 @@ function Badge({ status }: { status?: string | null }) {
 
 export default function Piket() {
   const { user } = useAuth();
+  const isAlumni = isAlumniStudent(user);
   const [todayAssignment, setTodayAssignment] = React.useState<PicketAssignment | null>(null);
   const [history, setHistory] = React.useState<PicketAssignment[]>([]);
   const [leaveRequests, setLeaveRequests] = React.useState<PicketLeaveRequest[]>([]);
@@ -158,6 +160,10 @@ export default function Piket() {
 
   const submitPicketPhoto = async () => {
     if (saving) return;
+    if (isAlumni) {
+      setError("Mahasiswa berstatus Alumni dibebaskan dari seluruh kewajiban piket.");
+      return;
+    }
     if (!todayAssignment) {
       setError("Bukti piket hanya dapat dikirim saat Anda punya jadwal piket hari ini.");
       return;
@@ -219,6 +225,10 @@ export default function Piket() {
 
   const submitLeave = async () => {
     if (saving) return;
+    if (isAlumni) {
+      setError("Mahasiswa berstatus Alumni dibebaskan dari seluruh kewajiban piket.");
+      return;
+    }
     if (!todayAssignment) {
       setError("Izin tidak piket hanya dapat diajukan saat Anda punya jadwal piket hari ini.");
       return;
@@ -321,7 +331,22 @@ export default function Piket() {
           </div>
         ) : (
           <>
-            {fixedDay && (
+            {isAlumni && (
+              <div className="rounded-[16px] border border-emerald-200 bg-emerald-50 px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] bg-emerald-600 text-white">
+                    <CheckCircle2 size={20} />
+                  </div>
+                  <div>
+                    <p className="font-black text-emerald-800">Status Anda: Alumni STAS-RG</p>
+                    <p className="mt-1 text-sm font-medium text-emerald-700">
+                      Mahasiswa berstatus Alumni dibebaskan dari seluruh kewajiban piket laboratorium. Anda tetap dapat melihat riwayat piket terdahulu melalui menu Riwayat Submit.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {!isAlumni && fixedDay && (
               <div className="rounded-[16px] border border-blue-200 bg-blue-50 px-5 py-4">
                 <p className="text-xs font-black uppercase tracking-wide text-blue-600">Hari Piket Tetap</p>
                 <p className="mt-1 font-black text-blue-900">{fixedDay.dayName || `Hari ke-${fixedDay.dayId}`}</p>
@@ -343,7 +368,13 @@ export default function Piket() {
               <div className="border-b border-border px-5 py-4">
                 <h2 className="text-sm font-black text-foreground">Jadwal Hari Ini</h2>
               </div>
-              {todayAssignment ? (
+              {isAlumni ? (
+                <div className="p-8 text-center">
+                  <CheckCircle2 className="mx-auto mb-3 text-emerald-600" size={34} />
+                  <p className="text-sm font-black text-foreground">Bebas Tugas Piket</p>
+                  <p className="mt-1 text-xs font-semibold text-muted-foreground">Sebagai Alumni, Anda tidak memiliki jadwal maupun kewajiban piket laboratorium.</p>
+                </div>
+              ) : todayAssignment ? (
                 <div className={`grid grid-cols-1 gap-4 p-5 ${todayAssignment.autoCompletedByWfh ? "" : "xl:grid-cols-[minmax(0,1fr)_340px_320px]"}`}>
                   <div className={`rounded-[14px] border p-4 ${todayAssignment.isHoliday || todayAssignment.isExempt ? "border-violet-200 bg-violet-50" : "border-emerald-200 bg-emerald-50"}`}>
                     <div className="flex items-start gap-3">

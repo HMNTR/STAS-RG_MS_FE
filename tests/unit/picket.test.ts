@@ -22,6 +22,8 @@ import {
   mapPicketStudentDay,
   mapPicketTask,
   mapPicketTodayAssignment,
+  filterActivePicketStudents,
+  isAlumniStudent,
   shouldDisablePicketSubmissionSubmit,
   shouldRequirePicketPhoto,
   validatePicketPhoto,
@@ -570,4 +572,86 @@ test("getDuplicatePicketTaskAssignments groups duplicate tasks per date", () => 
   const groups = getDuplicatePicketTaskAssignments(assignments);
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0].map((item) => item.scheduleId), ["SCH-1", "SCH-2"]);
+});
+
+test("isAlumniStudent correctly detects alumni across casing, aliases, and boolean flags", () => {
+  assert.equal(isAlumniStudent(null), false);
+  assert.equal(isAlumniStudent(undefined), false);
+  assert.equal(isAlumniStudent({ status: "Aktif" }), false);
+  assert.equal(isAlumniStudent({ status: "Cuti" }), false);
+  assert.equal(isAlumniStudent({ status: "Alumni" }), true);
+  assert.equal(isAlumniStudent({ status: "alumni" }), true);
+  assert.equal(isAlumniStudent({ status: "Lulus" }), true);
+  assert.equal(isAlumniStudent({ student_status: "Alumni" }), true);
+  assert.equal(isAlumniStudent({ studentStatus: "Alumni" }), true);
+  assert.equal(isAlumniStudent({ user_status: "Alumni" }), true);
+  assert.equal(isAlumniStudent({ is_alumni: true }), true);
+  assert.equal(isAlumniStudent({ isAlumni: true }), true);
+  assert.equal(isAlumniStudent({ is_alumni: false, status: "Aktif" }), false);
+});
+
+test("filterActivePicketStudents removes alumni students from active lists", () => {
+  const students = [
+    { id: "S1", name: "Budi", status: "Aktif" },
+    { id: "S2", name: "Siti", status: "Alumni" },
+    { id: "S3", name: "Agus", status: "Lulus" },
+    { id: "S4", name: "Dewi", isAlumni: true },
+    { id: "S5", name: "Rian", status: "Aktif" },
+  ];
+
+  const active = filterActivePicketStudents(students);
+  assert.deepEqual(active.map((s) => s.id), ["S1", "S5"]);
+});
+
+test("mapPicketTodayAssignment marks isExempt true for alumni students", () => {
+  const assignment = mapPicketTodayAssignment({
+    assignment: {
+      schedule_id: "SCH-99",
+      task_name: "Lap Kaca",
+      date: "2026-09-22",
+      student_id: "S-ALUMNI",
+      student_name: "Alumni Mahasiswa",
+      status: "Alumni",
+    },
+  });
+
+  assert.ok(assignment);
+  assert.equal(assignment?.isExempt, true);
+  assert.equal(shouldRequirePicketPhoto(assignment), false);
+});
+
+test("UI modules properly enforce alumni picket deactivation", () => {
+  const piketOperatorSource = readFileSync(
+    join(process.cwd(), "src/app/components/pages/operator/PiketOperator.tsx"),
+    "utf8"
+  );
+  const piketMahasiswaSource = readFileSync(
+    join(process.cwd(), "src/app/components/pages/mahasiswa/Piket.tsx"),
+    "utf8"
+  );
+  const dashboardSource = readFileSync(
+    join(process.cwd(), "src/app/components/pages/mahasiswa/Dashboard.tsx"),
+    "utf8"
+  );
+  const attendanceSource = readFileSync(
+    join(process.cwd(), "src/app/components/pages/mahasiswa/Attendance.tsx"),
+    "utf8"
+  );
+
+  // PiketOperator: Uses activeStudents and prevents manual scheduling of alumni
+  assert.match(piketOperatorSource, /filterActivePicketStudents\(students\)/);
+  assert.match(piketOperatorSource, /activeStudents\.map/);
+  assert.match(piketOperatorSource, /Mahasiswa berstatus Alumni tidak dapat dijadwalkan piket/);
+
+  // Piket (Mahasiswa): Checks isAlumniStudent, displays alumni banner, and guards submissions
+  assert.match(piketMahasiswaSource, /isAlumniStudent\(user\)/);
+  assert.match(piketMahasiswaSource, /Status Anda: Alumni STAS-RG/);
+  assert.match(piketMahasiswaSource, /Mahasiswa berstatus Alumni dibebaskan dari seluruh kewajiban piket/);
+
+  // Dashboard: Picket card is hidden for alumni
+  assert.match(dashboardSource, /!isAlumni && \(todayPicket \|\| todayPicketHoliday\)/);
+
+  // Attendance: Alumni are exempted from requiring picket photos before checkout
+  assert.match(attendanceSource, /if \(isAlumni\) return false;/);
+  assert.match(attendanceSource, /!isAlumni && shouldRequirePicketPhoto/);
 });

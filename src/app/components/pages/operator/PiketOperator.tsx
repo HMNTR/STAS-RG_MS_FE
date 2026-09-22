@@ -24,6 +24,7 @@ import {
   PicketStudentDay,
   PicketSubmission,
   PicketTask,
+  filterActivePicketStudents,
   getDuplicatePicketTaskAssignments,
   getJakartaDateKey,
   getManualPicketSchedulePayloads,
@@ -31,6 +32,7 @@ import {
   getPicketAssignmentStatus,
   getPicketScheduleGeneratePayload,
   getPicketTaskConflict,
+  isAlumniStudent,
   isPicketAssignmentSubmitted,
   mapPicketAssignment,
   mapPicketHoliday,
@@ -47,6 +49,8 @@ type StudentOption = {
   nim?: string | null;
   initials: string;
   tipe?: string | null;
+  status?: string | null;
+  isAlumni?: boolean;
 };
 
 type PicketSettings = {
@@ -120,12 +124,15 @@ const emptyScheduleForm: ScheduleForm = {
 
 function normalizeStudent(row: any): StudentOption {
   const name = row?.name || row?.student_name || row?.studentName || "Mahasiswa";
+  const status = row?.status || row?.student_status || row?.studentStatus || null;
   return {
     id: String(row?.id || row?.student_id || row?.studentId || ""),
     name,
     nim: row?.nim || row?.student_nim || row?.studentNim || null,
     initials: row?.initials || name.slice(0, 2).toUpperCase(),
     tipe: row?.tipe || row?.student_type || row?.studentType || null,
+    status: status ? String(status) : null,
+    isAlumni: isAlumniStudent(row),
   };
 }
 
@@ -170,6 +177,8 @@ export default function PiketOperator() {
   const [taskName, setTaskName] = React.useState("");
   const [taskDescription, setTaskDescription] = React.useState("");
   const [students, setStudents] = React.useState<StudentOption[]>([]);
+  const activeStudents = React.useMemo(() => filterActivePicketStudents(students), [students]);
+  const activeStudentIds = React.useMemo(() => new Set(activeStudents.map((s) => s.id)), [activeStudents]);
   const [studentDays, setStudentDays] = React.useState<PicketStudentDay[]>([]);
   const [managerIds, setManagerIds] = React.useState<string[]>([]);
   const [assignments, setAssignments] = React.useState<PicketAssignment[]>([]);
@@ -448,6 +457,12 @@ export default function PiketOperator() {
       return;
     }
 
+    const selectedStudent = students.find((s) => s.id === scheduleForm.studentId);
+    if (selectedStudent && isAlumniStudent(selectedStudent)) {
+      setError("Mahasiswa berstatus Alumni tidak dapat dijadwalkan piket.");
+      return;
+    }
+
     const currentScheduleId = editingScheduleId || "";
     const studentConflict = assignments.find((item) => (
       item.scheduleDate === date &&
@@ -543,7 +558,9 @@ export default function PiketOperator() {
   const saveManagers = async () => {
     try {
       setSaving(true);
-      await apiPatch("/picket/managers", { studentIds: managerIds });
+      const sanitizedManagerIds = managerIds.filter((id) => activeStudentIds.has(id));
+      await apiPatch("/picket/managers", { studentIds: sanitizedManagerIds });
+      setManagerIds(sanitizedManagerIds);
       setInfo("Penanggung jawab piket diperbarui.");
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan penanggung jawab piket.");
@@ -692,6 +709,9 @@ export default function PiketOperator() {
   });
   const selectedWeekday = settings.weeklySchedule.find((day) => day.dayOfWeek === selectedDayOfWeek) || settings.weeklySchedule[0];
   const selectedWeekdayStudentIds = selectedWeekday?.studentIds || [];
+  const selectedWeekdayActiveStudentIds = React.useMemo(() => {
+    return selectedWeekdayStudentIds.filter((id) => activeStudentIds.has(id));
+  }, [selectedWeekdayStudentIds, activeStudentIds]);
 
   const Shell = isStudentPicShell ? Layout : OperatorLayout;
   const scrollToReviewSubmissions = () => {
@@ -912,9 +932,11 @@ export default function PiketOperator() {
 
             <section className="rounded-[16px] border border-border bg-white p-5 shadow-sm">
               <h2 className="text-sm font-black text-foreground">Penanggung Jawab Piket</h2>
-              <p className="mt-1 text-xs text-muted-foreground">Mahasiswa terpilih dapat membantu mengelola fitur piket seperti admin.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Mahasiswa terpilih dapat membantu mengelola fitur piket seperti admin. Mahasiswa Alumni dinonaktifkan.</p>
               <div className="mt-4 max-h-[260px] overflow-y-auto rounded-[10px] border border-border">
-                {students.map((student) => (
+                {activeStudents.length === 0 ? (
+                  <div className="p-4 text-center text-xs font-semibold text-muted-foreground">Belum ada mahasiswa aktif.</div>
+                ) : activeStudents.map((student) => (
                   <label key={student.id} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0">
                     <input
                       type="checkbox"
@@ -938,14 +960,14 @@ export default function PiketOperator() {
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                   <h2 className="text-sm font-black text-foreground">Hari Piket Tetap Mahasiswa</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">Perubahan hari berlaku mulai besok dan tidak memindahkan kejadian izin sementara.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Perubahan hari berlaku mulai besok. Mahasiswa Alumni otomatis dinonaktifkan dari rotasi.</p>
                 </div>
-                <span className="w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">{selectedWeekday?.label}: {selectedWeekdayStudentIds.length} mahasiswa</span>
+                <span className="w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">{selectedWeekday?.label}: {selectedWeekdayActiveStudentIds.length} mahasiswa aktif</span>
               </div>
               <div className="mt-4 max-h-[420px] overflow-y-auto rounded-[12px] border border-border">
-                {students.length === 0 ? (
+                {activeStudents.length === 0 ? (
                   <div className="p-5 text-center text-sm font-semibold text-muted-foreground">Belum ada mahasiswa aktif.</div>
-                ) : students.map((student) => {
+                ) : activeStudents.map((student) => {
                   const fixedDay = studentDays.find((item) => item.studentId === student.id);
                   return (
                     <div key={student.id} className="grid grid-cols-1 gap-3 border-b border-border px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_180px] sm:items-center">
@@ -1006,8 +1028,8 @@ export default function PiketOperator() {
                     onChange={(event) => setScheduleForm((prev) => ({ ...prev, studentId: event.target.value }))}
                     className="h-10 min-w-0 rounded-[10px] border border-border bg-white px-3 text-sm font-bold outline-none lg:col-span-2"
                   >
-                    <option value="">Pilih mahasiswa</option>
-                    {students.map((student) => {
+                    <option value="">Pilih mahasiswa aktif</option>
+                    {activeStudents.map((student) => {
                       const usedByAnotherSchedule = assignments.some((item) => (
                         item.scheduleDate === date &&
                         item.studentId === student.id &&

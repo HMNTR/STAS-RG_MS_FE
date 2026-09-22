@@ -11,6 +11,7 @@ import {
   ensurePicketPhotoPreviewable,
   fileToDataUrl,
   hasPicketPhotoSubmission,
+  isAlumniStudent,
   mapPicketAssignment,
   mapPicketTodayAssignment,
   mapPicketSubmissionResult,
@@ -226,6 +227,7 @@ export default function Attendance() {
   });
   const [todayHoliday, setTodayHoliday] = useState<HolidayItem | null>(null);
   const [studentType, setStudentType] = useState<string>(String(user?.tipe || ""));
+  const isAlumni = isAlumniStudent(user);
   const [lastGpsAccuracy, setLastGpsAccuracy] = useState<number | null>(null);
   const [lastGpsResult, setLastGpsResult] = useState<GpsResult | null>(null);
   const [gpsWarning, setGpsWarning] = useState("");
@@ -390,6 +392,10 @@ export default function Attendance() {
     let active = true;
 
     const loadPicketToday = async () => {
+      if (isAlumni) {
+        if (active) setTodayPicket(null);
+        return;
+      }
       try {
         const response = await apiGet<any>(`/picket/today?studentId=${encodeURIComponent(user.id)}&_=${Date.now()}`);
         if (!active) return;
@@ -598,6 +604,7 @@ export default function Attendance() {
   };
 
   const shouldRequirePicketPhotoBeforeCheckout = () => {
+    if (isAlumni) return false;
     if (todayData.status !== "Berlangsung") return false;
     return shouldRequirePicketPhoto(todayPicket);
   };
@@ -926,7 +933,7 @@ export default function Attendance() {
             </div>
           </div>
         )}
-        {picketModalOpen && todayPicket && shouldRequirePicketPhoto(todayPicket) && (
+        {picketModalOpen && todayPicket && !isAlumni && shouldRequirePicketPhoto(todayPicket) && (
           <div className="fixed inset-0 z-[510] flex items-center justify-center bg-black/50 px-4">
             <div className="w-full max-w-[460px] rounded-[16px] border border-emerald-200 bg-white p-5 shadow-2xl">
               <div className="mb-4">
@@ -1027,7 +1034,7 @@ export default function Attendance() {
             {todayData.status === "Berlangsung" ? " Anda tetap bisa check-out untuk menutup sesi yang sudah berjalan." : ""}
           </div>
         )}
-        {todayPicket && (
+        {todayPicket && !isAlumni && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
             <span>Jadwal piket hari ini: {todayPicket.taskName}. </span>
             {todayPicket.autoCompletedByWfh ? (
