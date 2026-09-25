@@ -644,6 +644,10 @@ export default function Attendance() {
 
   const handleAttendanceAction = async (forceEarlyCheckout = false) => {
     if (!user?.id || submitting || checkingLogbook) return;
+    if (isAlumni) {
+      setError("Mahasiswa berstatus Alumni tidak memiliki kewajiban absensi.");
+      return;
+    }
     const holidayToday = attendanceRules.excludeHolidaysFromWorkdays
       ? todayHoliday || findHolidayForDate(attendanceRules.holidays, getJakartaDateKey())
       : null;
@@ -1052,7 +1056,7 @@ export default function Attendance() {
           </div>
         )}
 
-        {isRisetStudent && (
+        {isRisetStudent && !isAlumni && (
           <div className={`rounded-[14px] border px-4 py-4 shadow-sm md:px-5 ${weeklyStatusClass}`}>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="flex items-start gap-3">
@@ -1118,81 +1122,97 @@ export default function Attendance() {
 
               {/* Action */}
               <div className="flex items-center justify-between gap-6 pt-2">
-                <div className="flex-1">
-                  <div className="flex items-center justify-between text-xs text-white/70 mb-2">
-                    <span>Status: {currentHoliday && todayData.status !== "Berlangsung" ? "Libur" : todayData.status}</span>
-                    {targetGps && <span>Radius: {targetGps.radius} m</span>}
-                  </div>
-                  {attendanceRules.autoCheckoutEnabled && (
-                    <p className="text-[11px] text-white/60 mb-2">
-                      Sistem akan otomatis checkout mahasiswa yang masih aktif pada pukul {attendanceRules.autoCheckoutTime} WIB.
-                    </p>
-                  )}
-                  {isSystemAutoCheckout(todayData) && todayData.status === "Selesai" && (
-                    <div
-                      title="Checkout dilakukan otomatis oleh sistem karena belum checkout manual sampai batas waktu."
-                      className="mb-2 inline-flex rounded-full border border-sky-300/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-sky-200"
-                    >
-                      Auto checkout sistem
+                {isAlumni ? (
+                  <div className="w-full bg-emerald-500/15 border border-emerald-500/30 rounded-[12px] p-4 text-emerald-100 flex items-start gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300">
+                      <Clock size={18} />
                     </div>
-                  )}
-                  {targetGps && (
-                    <button
-                      onClick={openGpsCoordinates}
-                      type="button"
-                      className="text-[11px] text-white/80 hover:text-white underline underline-offset-2 mb-2"
-                    >
-                      Lihat titik absensi ({targetGps.latitude.toFixed(5)}, {targetGps.longitude.toFixed(5)})
-                    </button>
-                  )}
-                  {lastGpsAccuracy != null && (
-                    <p className="text-[11px] text-white/70 mb-2">
-                      Akurasi GPS perangkat: {Math.round(lastGpsAccuracy)} m
-                    </p>
-                  )}
-                  {lastGpsResult?.distanceMeters != null && (
-                    <p className="text-[11px] text-white/70 mb-2">
-                      Jarak terakhir: {Math.round(lastGpsResult.distanceMeters)} m
-                      {lastGpsResult.allowedRadiusMeters != null ? ` dari radius ${Math.round(lastGpsResult.allowedRadiusMeters)} m` : ""}
-                    </p>
-                  )}
-                  {gpsWarning && (
-                    <p className="text-[11px] text-amber-200 mb-2">
-                      {gpsWarning}
-                    </p>
-                  )}
-                  {isDesktopAttendanceBlocked && (
-                    <p className="text-[11px] text-amber-200 mb-2">
-                      Perangkat ini terdeteksi sebagai desktop/laptop. Absensi GPS mahasiswa harus dilakukan dari HP agar lokasi presisi bisa terbaca.
-                    </p>
-                  )}
-                  <div className="w-full bg-white/10 rounded-full h-1.5">
-                    <div
-                      className="bg-success h-1.5 rounded-full"
-                      style={{ width: todayData.status === "Selesai" ? "100%" : todayData.status === "Berlangsung" ? "50%" : "0%" }}
-                    ></div>
+                    <div>
+                      <p className="font-bold text-sm text-emerald-300">Status Alumni — Bebas Presensi</p>
+                      <p className="text-xs text-white/80 mt-1 leading-relaxed">
+                        Anda telah menyelesaikan masa riset/magang. Presensi GPS harian dan target jam tidak lagi berlaku untuk Anda. Riwayat di bawah ini adalah arsip kehadiran Anda.
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <button
-                  onClick={() => handleAttendanceAction()}
-                  disabled={submitting || checkingLogbook || todayData.status === "Selesai" || isDesktopAttendanceBlocked || holidayCheckInBlocked}
-                  className="bg-primary hover:bg-primary-light disabled:bg-slate-500 disabled:cursor-not-allowed text-white px-6 py-3 rounded-[12px] font-bold shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
-                >
-                  {todayData.status === "Berlangsung" ? <LogOut size={18} /> : <MapPin size={18} />}
-                  {todayData.status === "Selesai"
-                    ? "Absensi Selesai"
-                    : holidayCheckInBlocked
-                      ? "Hari Ini Libur"
-                    : isDesktopAttendanceBlocked
-                      ? "Gunakan HP untuk Absensi"
-                      : checkingLogbook
-                        ? "Mengecek Logbook..."
-                        : submitting
-                        ? "Memproses..."
-                        : todayData.status === "Berlangsung"
-                          ? "Check-Out Sekarang"
-                          : "Check-In Sekarang"}
-                </button>
+                ) : (
+                  <>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between text-xs text-white/70 mb-2">
+                        <span>Status: {currentHoliday && todayData.status !== "Berlangsung" ? "Libur" : todayData.status}</span>
+                        {targetGps && <span>Radius: {targetGps.radius} m</span>}
+                      </div>
+                      {attendanceRules.autoCheckoutEnabled && (
+                        <p className="text-[11px] text-white/60 mb-2">
+                          Sistem akan otomatis checkout mahasiswa yang masih aktif pada pukul {attendanceRules.autoCheckoutTime} WIB.
+                        </p>
+                      )}
+                      {isSystemAutoCheckout(todayData) && todayData.status === "Selesai" && (
+                        <div
+                          title="Checkout dilakukan otomatis oleh sistem karena belum checkout manual sampai batas waktu."
+                          className="mb-2 inline-flex rounded-full border border-sky-300/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-sky-200"
+                        >
+                          Auto checkout sistem
+                        </div>
+                      )}
+                      {targetGps && (
+                        <button
+                          onClick={openGpsCoordinates}
+                          type="button"
+                          className="text-[11px] text-white/80 hover:text-white underline underline-offset-2 mb-2"
+                        >
+                          Lihat titik absensi ({targetGps.latitude.toFixed(5)}, {targetGps.longitude.toFixed(5)})
+                        </button>
+                      )}
+                      {lastGpsAccuracy != null && (
+                        <p className="text-[11px] text-white/70 mb-2">
+                          Akurasi GPS perangkat: {Math.round(lastGpsAccuracy)} m
+                        </p>
+                      )}
+                      {lastGpsResult?.distanceMeters != null && (
+                        <p className="text-[11px] text-white/70 mb-2">
+                          Jarak terakhir: {Math.round(lastGpsResult.distanceMeters)} m
+                          {lastGpsResult.allowedRadiusMeters != null ? ` dari radius ${Math.round(lastGpsResult.allowedRadiusMeters)} m` : ""}
+                        </p>
+                      )}
+                      {gpsWarning && (
+                        <p className="text-[11px] text-amber-200 mb-2">
+                          {gpsWarning}
+                        </p>
+                      )}
+                      {isDesktopAttendanceBlocked && (
+                        <p className="text-[11px] text-amber-200 mb-2">
+                          Perangkat ini terdeteksi sebagai desktop/laptop. Absensi GPS mahasiswa harus dilakukan dari HP agar lokasi presisi bisa terbaca.
+                        </p>
+                      )}
+                      <div className="w-full bg-white/10 rounded-full h-1.5">
+                        <div
+                          className="bg-success h-1.5 rounded-full"
+                          style={{ width: todayData.status === "Selesai" ? "100%" : todayData.status === "Berlangsung" ? "50%" : "0%" }}
+                        ></div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleAttendanceAction()}
+                      disabled={submitting || checkingLogbook || todayData.status === "Selesai" || isDesktopAttendanceBlocked || holidayCheckInBlocked}
+                      className="bg-primary hover:bg-primary-light disabled:bg-slate-500 disabled:cursor-not-allowed text-white px-6 py-3 rounded-[12px] font-bold shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
+                    >
+                      {todayData.status === "Berlangsung" ? <LogOut size={18} /> : <MapPin size={18} />}
+                      {todayData.status === "Selesai"
+                        ? "Absensi Selesai"
+                        : holidayCheckInBlocked
+                          ? "Hari Ini Libur"
+                        : isDesktopAttendanceBlocked
+                          ? "Gunakan HP untuk Absensi"
+                          : checkingLogbook
+                            ? "Mengecek Logbook..."
+                            : submitting
+                            ? "Memproses..."
+                            : todayData.status === "Berlangsung"
+                              ? "Check-Out Sekarang"
+                              : "Check-In Sekarang"}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

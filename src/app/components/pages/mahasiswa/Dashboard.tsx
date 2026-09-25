@@ -439,17 +439,18 @@ export default function Dashboard() {
         {isAlumni && <AlumniReactivationCard />}
 
         {/* ── Stat Cards ── */}
+        {/* ── Stat Cards ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 xl:grid-cols-4 2xl:grid-cols-5">
           <StatCard
             icon={<UserCheck size={20} className="md:w-[22px] md:h-[22px] text-[#6C47FF]" />}
             label="Kehadiran"
             value={<><span>{attendanceHadir}</span><span className="text-sm md:text-base text-muted-foreground font-bold">/{attendanceTotal}</span></>}
-            sub={`${attendancePct}% bulan ini`}
+            sub={isAlumni ? "Arsip total presensi" : `${attendancePct}% bulan ini`}
             barPct={attendancePct}
             barColor="bg-[#6C47FF]"
             href="/attendance"
           />
-          {isRisetStudent && (
+          {isRisetStudent && !isAlumni && (
             <StatCard
               icon={<Hourglass size={20} className="md:w-[22px] md:h-[22px] text-emerald-500" />}
               label="Jam Riset Minggu Ini"
@@ -464,7 +465,7 @@ export default function Dashboard() {
             icon={<BookOpen size={20} className="md:w-[22px] md:h-[22px] text-indigo-500" />}
             label="Entri Logbook"
             value={logbookEntries}
-            sub={`Target ${logbookTarget} entri`}
+            sub={isAlumni ? `${logbookEntries} total entri logbook` : `Target ${logbookTarget} entri`}
             barPct={logbookPct}
             barColor="bg-indigo-500"
             href="/logbook"
@@ -478,7 +479,7 @@ export default function Dashboard() {
             barColor="bg-emerald-500"
             href="/research"
           />
-          {!isRisetStudent && (
+          {!isRisetStudent && !isAlumni && (
             <StatCard
               icon={<CalendarOff size={20} className="md:w-[22px] md:h-[22px] text-amber-500" />}
               label="Sisa Cuti"
@@ -489,50 +490,91 @@ export default function Dashboard() {
               href="/leave"
             />
           )}
-          <StatCard
-            icon={<Calendar size={20} className="md:w-[22px] md:h-[22px] text-sky-500" />}
-            label="Jatah WFH"
-            value={totalWfh > 0
-              ? <><span>{remainingWfh}</span><span className="text-sm md:text-base text-muted-foreground font-bold">/{totalWfh}</span></>
-              : <span className="text-base md:text-lg">Tidak ada</span>}
-            sub={wfhSourceMeta.helperText || (totalWfh > 0 ? "Hari WFH tersisa" : "Anda tidak punya jatah WFH")}
-            barPct={wfhPct}
-            barColor="bg-sky-500"
-            href="/leave"
-          />
+          {!isAlumni && (
+            <StatCard
+              icon={<Calendar size={20} className="md:w-[22px] md:h-[22px] text-sky-500" />}
+              label="Jatah WFH"
+              value={totalWfh > 0
+                ? <><span>{remainingWfh}</span><span className="text-sm md:text-base text-muted-foreground font-bold">/{totalWfh}</span></>
+                : <span className="text-base md:text-lg">Tidak ada</span>}
+              sub={wfhSourceMeta.helperText || (totalWfh > 0 ? "Hari WFH tersisa" : "Anda tidak punya jatah WFH")}
+              barPct={wfhPct}
+              barColor="bg-sky-500"
+              href="/leave"
+            />
+          )}
         </div>
 
-        {/* ── Attendance Banner ── */}
-        <Link
-          to="/attendance"
-          className="bg-gradient-to-r from-[#0AB600] to-[#065e00] rounded-[14px] p-4 md:p-5 text-white shadow-md relative overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3 md:gap-4 hover:shadow-lg transition-all group"
-        >
-          <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: "radial-gradient(circle at 10% 50%, white 1px, transparent 1px)", backgroundSize: "18px 18px" }} />
-          <div className="relative z-10 flex items-center gap-3 md:gap-5 min-w-0">
-            <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
-              <MapPin size={20} className="md:w-[22px] md:h-[22px] text-white" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                <span className="text-[9px] md:text-[10px] font-black text-white/90 uppercase tracking-wider">Status Kehadiran Hari Ini</span>
+        {/* ── Attendance Banner / Alumni Status Banner ── */}
+        {isAlumni ? (
+          <div className="bg-gradient-to-r from-emerald-800 to-teal-900 rounded-[14px] p-4 md:p-5 text-white shadow-md relative overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3 md:gap-4">
+            <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: "radial-gradient(circle at 10% 50%, white 1px, transparent 1px)", backgroundSize: "18px 18px" }} />
+            <div className="relative z-10 flex items-center gap-3 md:gap-5 min-w-0">
+              <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/15 border border-white/20 flex items-center justify-center shrink-0 text-emerald-300">
+                <CheckCircle2 size={24} />
               </div>
-              <p className="font-black text-sm md:text-base break-words">
-                {attendanceToday?.checkInAt
-                  ? `Check-in ${new Date(attendanceToday.checkInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
-                  : "Belum Check-in"}
-              </p>
-              <p className="text-xs text-white/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                <Clock size={11} /> Status: {attendanceToday?.status || "Belum Check-in"}
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] md:text-[11px] font-black uppercase tracking-wider text-emerald-300">Status Keanggotaan</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-400/20 text-emerald-200 border border-emerald-400/30">
+                    Alumni STAS-RG
+                  </span>
+                </div>
+                <p className="font-bold text-sm md:text-base text-white">
+                  Bebas dari Seluruh Kewajiban Absensi & Target Jam
+                </p>
+                <p className="text-xs text-white/70 mt-0.5">
+                  Anda telah menyelesaikan masa riset/magang. Presensi harian, piket, dan aturan jam kerja tidak lagi berlaku untuk Anda.
+                </p>
+              </div>
+            </div>
+            <div className="relative z-10 flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+              <Link
+                to="/attendance"
+                className="bg-white/15 hover:bg-white/25 text-white px-3.5 py-2 rounded-[12px] font-bold text-xs flex items-center gap-1.5 transition-all justify-center"
+              >
+                Riwayat Presensi
+              </Link>
+              <Link
+                to="/graduation"
+                className="bg-emerald-500 hover:bg-emerald-600 text-white px-3.5 py-2 rounded-[12px] font-bold text-xs flex items-center gap-1.5 transition-all justify-center shadow-sm"
+              >
+                Berkas Kelulusan
+              </Link>
             </div>
           </div>
-          <div className="relative z-10 flex items-center gap-3 shrink-0 w-full sm:w-auto">
-            <div className="bg-white/15 hover:bg-white/25 text-white px-4 md:px-5 py-2 md:py-2.5 rounded-[12px] font-bold text-xs md:text-sm flex items-center gap-2 group-hover:gap-3 transition-all w-full sm:w-auto justify-center">
-              Lihat Riwayat <ArrowRight size={14} strokeWidth={3} />
+        ) : (
+          <Link
+            to="/attendance"
+            className="bg-gradient-to-r from-[#0AB600] to-[#065e00] rounded-[14px] p-4 md:p-5 text-white shadow-md relative overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3 md:gap-4 hover:shadow-lg transition-all group"
+          >
+            <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: "radial-gradient(circle at 10% 50%, white 1px, transparent 1px)", backgroundSize: "18px 18px" }} />
+            <div className="relative z-10 flex items-center gap-3 md:gap-5 min-w-0">
+              <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
+                <MapPin size={20} className="md:w-[22px] md:h-[22px] text-white" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                  <span className="text-[9px] md:text-[10px] font-black text-white/90 uppercase tracking-wider">Status Kehadiran Hari Ini</span>
+                </div>
+                <p className="font-black text-sm md:text-base break-words">
+                  {attendanceToday?.checkInAt
+                    ? `Check-in ${new Date(attendanceToday.checkInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
+                    : "Belum Check-in"}
+                </p>
+                <p className="text-xs text-white/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  <Clock size={11} /> Status: {attendanceToday?.status || "Belum Check-in"}
+                </p>
+              </div>
             </div>
-          </div>
-        </Link>
+            <div className="relative z-10 flex items-center gap-3 shrink-0 w-full sm:w-auto">
+              <div className="bg-white/15 hover:bg-white/25 text-white px-4 md:px-5 py-2 md:py-2.5 rounded-[12px] font-bold text-xs md:text-sm flex items-center gap-2 group-hover:gap-3 transition-all w-full sm:w-auto justify-center">
+                Lihat Riwayat <ArrowRight size={14} strokeWidth={3} />
+              </div>
+            </div>
+          </Link>
+        )}
 
         {/* ── Main Grid 8-4 ── */}
         {!isAlumni && (todayPicket || todayPicketHoliday) && (

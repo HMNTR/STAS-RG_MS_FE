@@ -453,6 +453,9 @@ export function Layout({ children, title = "Dashboard" }: LayoutProps) {
     return () => window.removeEventListener("stas:access-locked", onAccessLocked);
   }, [shouldHideHolidayAttendanceLock, user?.role]);
 
+  const studentStatus = String((user as any)?.status || (user as any)?.studentStatus || "").trim();
+  const isAlumni = user?.role === "mahasiswa" && studentStatus.toLowerCase() === "alumni";
+
   // Alumni tidak perlu auto-logout jam 22
   useEffect(() => {
     if (user?.role !== "mahasiswa" || isAlumni) return;
@@ -508,10 +511,7 @@ export function Layout({ children, title = "Dashboard" }: LayoutProps) {
       window.removeEventListener("focus", checkExpiry);
       document.removeEventListener("visibilitychange", checkExpiry);
     };
-  }, [user?.role, logout, navigate]);
-
-  const studentStatus = String((user as any)?.status || (user as any)?.studentStatus || "").trim();
-  const isAlumni = user?.role === "mahasiswa" && studentStatus === "Alumni";
+  }, [user?.role, isAlumni, logout, navigate]);
 
   const [activeScrumInfo, setActiveScrumInfo] = useState<{
     hasActiveScrum: boolean;
