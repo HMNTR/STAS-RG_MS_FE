@@ -281,7 +281,7 @@ export default function Attendance() {
       });
       const rawPicket = data?.picketToday ?? data?.todayPicket ?? data?.picketAssignment ?? data?.picket;
       if (rawPicket !== undefined) {
-        setTodayPicket(mapPicketTodayAssignment(rawPicket));
+        setTodayPicket(isAlumni ? null : mapPicketTodayAssignment(rawPicket));
       }
       if (data?.attendanceRules) {
         const holidays = normalizeHolidays(data.attendanceRules.holidays || data.holidays);

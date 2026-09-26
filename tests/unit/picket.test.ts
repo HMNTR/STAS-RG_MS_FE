@@ -654,4 +654,17 @@ test("UI modules properly enforce alumni picket deactivation", () => {
   // Attendance: Alumni are exempted from requiring picket photos before checkout
   assert.match(attendanceSource, /if \(isAlumni\) return false;/);
   assert.match(attendanceSource, /!isAlumni && shouldRequirePicketPhoto/);
+
+  // Layout: Alumni sidebar hides the Piket menu
+  const layoutSource = readFileSync(
+    join(process.cwd(), "src/app/components/templates/Layout.tsx"),
+    "utf8"
+  );
+  assert.match(layoutSource, /\{ name: "Piket", path: "\/picket", icon: ClipboardCheck, alumniHidden: true \}/);
+  assert.match(layoutSource, /isAlumniStudent\(user\)/);
+
+  // PiketOperator: Alumni are excluded from missingAssignments and get Bebas Tugas status
+  assert.match(piketOperatorSource, /alumniStudentIds\.has\(item\.studentId\)/);
+  assert.match(piketOperatorSource, /Bebas Tugas \(Alumni\)/);
 });
+

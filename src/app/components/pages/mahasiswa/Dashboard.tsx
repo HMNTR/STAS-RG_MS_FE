@@ -10,7 +10,7 @@ import {
 import { apiGet, apiPost } from "../../../lib/api";
 import { useAuth } from "../../../context/AuthContext";
 import { getWfhSourceMeta, getWfhSummary } from "../../../lib/wfh";
-import { PicketAssignment, PicketHoliday, getPicketHolidayFromTodayResponse, hasPicketPhotoSubmission, isPicketHolidayResponse, mapPicketTodayAssignment } from "../../../lib/picket";
+import { PicketAssignment, PicketHoliday, getPicketHolidayFromTodayResponse, hasPicketPhotoSubmission, isAlumniStudent, isPicketHolidayResponse, mapPicketTodayAssignment } from "../../../lib/picket";
 
 function getActiveMilestone(project: any) {
   const milestones = project?.milestones || [];
@@ -208,8 +208,9 @@ export default function Dashboard() {
           apiGet<any>(`/picket/today?studentId=${encodeURIComponent(user.id)}&_=${Date.now()}`).catch(() => null),
         ]);
         setDashboardData(data);
-        setTodayPicket(mapPicketTodayAssignment(picket));
-        setTodayPicketHoliday(isPicketHolidayResponse(picket) ? getPicketHolidayFromTodayResponse(picket) : null);
+        const userIsAlumni = isAlumniStudent(user) || isAlumniStudent(data?.student) || isAlumniStudent(data?.header);
+        setTodayPicket(userIsAlumni ? null : mapPicketTodayAssignment(picket));
+        setTodayPicketHoliday(userIsAlumni ? null : (isPicketHolidayResponse(picket) ? getPicketHolidayFromTodayResponse(picket) : null));
       } catch {
       }
     };
@@ -346,7 +347,7 @@ export default function Dashboard() {
   const letterRecent = dashboardData?.letterRecent || [];
   const attendanceToday = dashboardData?.attendanceToday || {};
   const studentStatus = String(dashboardData?.student?.status || dashboardData?.header?.studentStatus || user?.studentStatus || user?.status || "");
-  const isAlumni = studentStatus.toLowerCase() === "alumni";
+  const isAlumni = isAlumniStudent(user) || isAlumniStudent(dashboardData?.student) || isAlumniStudent(dashboardData?.header) || studentStatus.toLowerCase() === "alumni" || studentStatus.toLowerCase() === "lulus";
   const isRisetStudent = isRisetStudentType(user?.tipe || dashboardData?.header?.tipe || dashboardData?.student?.tipe);
   const risetWeeklyHours = Number(dashboardData?.stats?.risetWeeklyHours ?? dashboardData?.student?.jamMingguIni ?? dashboardData?.student?.jam_minggu_ini ?? 0);
   const risetWeeklyTargetHours = getPositiveHourValue(dashboardData?.stats?.risetWeeklyTargetHours ?? dashboardData?.student?.jamMingguTarget ?? dashboardData?.student?.jam_minggu_target, 6);

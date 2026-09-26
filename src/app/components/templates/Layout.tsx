@@ -34,6 +34,7 @@ import { ProfileAvatar } from "../molecules/ProfileAvatar";
 import { useSyncedStoredUser } from "../../lib/userProfileSync";
 import { normalizeHolidays } from "../../lib/holidays";
 import { shouldClearAccessLockFromError, shouldSuppressHolidayAttendanceLock } from "../../lib/accessLocks";
+import { isAlumniStudent } from "../../lib/picket";
 
 type StudentAccessLock = {
   id?: string;
@@ -454,7 +455,7 @@ export function Layout({ children, title = "Dashboard" }: LayoutProps) {
   }, [shouldHideHolidayAttendanceLock, user?.role]);
 
   const studentStatus = String((user as any)?.status || (user as any)?.studentStatus || "").trim();
-  const isAlumni = user?.role === "mahasiswa" && studentStatus.toLowerCase() === "alumni";
+  const isAlumni = user?.role === "mahasiswa" && (studentStatus.toLowerCase() === "alumni" || isAlumniStudent(user));
 
   // Alumni tidak perlu auto-logout jam 22
   useEffect(() => {

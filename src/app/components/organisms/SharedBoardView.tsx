@@ -859,7 +859,8 @@ export function SharedBoardView({
   const boardPermissions = permissionsMap[activeId] || getDefaultBoardPermissions(currentUser?.role);
   const canManageCards = boardPermissions.canManageCards;
   const canFillExistingCards = canManageCards || boardPermissions.canFillExistingCards;
-  const canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen";
+  const isLeader = isMahasiswaKetuaRiset(currentUser, teamMembersMap[activeId] || []);
+  const canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen" || isLeader;
 
   // Initialize attachment link when project changes
   React.useEffect(() => {

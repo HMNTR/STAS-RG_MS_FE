@@ -113,6 +113,7 @@ const statusStyle: Record<string, string> = {
   Bermasalah: "border-red-200 bg-red-50 text-red-600",
   Libur: "border-violet-200 bg-violet-50 text-violet-700",
   "Selesai Otomatis — WFH": "border-indigo-200 bg-indigo-50 text-indigo-700",
+  "Bebas Tugas (Alumni)": "border-slate-200 bg-slate-100 text-slate-600",
 };
 
 const emptyScheduleForm: ScheduleForm = {
@@ -702,7 +703,10 @@ export default function PiketOperator() {
 
   const selectedHoliday = holidays.find((holiday) => holiday.date === date) || assignments.find((item) => item.isHoliday)?.holiday || null;
   const duplicateTaskAssignments = getDuplicatePicketTaskAssignments(assignments);
-  const missingAssignments = assignments.filter((item) => !item.isHoliday && !item.isExempt && !isPicketAssignmentSubmitted(item));
+  const alumniStudentIds = React.useMemo(() => {
+    return new Set(students.filter((s) => s.isAlumni).map((s) => s.id));
+  }, [students]);
+  const missingAssignments = assignments.filter((item) => !item.isHoliday && !item.isExempt && !alumniStudentIds.has(item.studentId) && !isPicketAssignmentSubmitted(item));
   const filteredSubmissions = submissions.filter((item) => {
     const haystack = `${item.studentName} ${item.nim || ""} ${item.taskName} ${item.status}`.toLowerCase();
     return haystack.includes(query.trim().toLowerCase());
@@ -1134,20 +1138,31 @@ export default function PiketOperator() {
                       <tr><th className="px-5 py-3">Mahasiswa</th><th className="px-5 py-3">Tugas</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Bukti</th><th className="px-5 py-3">Aksi</th></tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {assignments.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-5 py-3"><p className="font-black text-foreground">{item.studentName}</p><p className="text-xs text-muted-foreground">{item.nim || "-"}</p></td>
-                          <td className="px-5 py-3"><p className="font-bold text-foreground">{item.taskName}</p>{item.taskDescription && <p className="text-xs text-muted-foreground">{item.taskDescription}</p>}{item.notes && <p className="text-xs text-muted-foreground">Catatan: {item.notes}</p>}</td>
-                          <td className="px-5 py-3"><Badge status={getPicketAssignmentStatus(item)} /></td>
-                          <td className="px-5 py-3">{item.autoCompletedByWfh ? <span className="text-xs font-semibold text-indigo-700">Otomatis via WFH</span> : item.photoUrl ? <a href={item.photoUrl} target="_blank" rel="noreferrer" className="text-xs font-black text-blue-600 hover:underline">Lihat Foto</a> : <span className="text-xs text-muted-foreground">Belum submit</span>}</td>
-                          <td className="px-5 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              <button onClick={() => startEditSchedule(item)} className="h-8 rounded-[8px] border border-border bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50">Edit</button>
-                              <button onClick={() => removeDailySchedule(item)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-red-500 px-3 text-xs font-black text-white disabled:opacity-60"><Trash2 size={13} /> Hapus</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {assignments.map((item) => {
+                        const isStudentAlumni = alumniStudentIds.has(item.studentId);
+                        return (
+                          <tr key={item.id}>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2">
+                                <p className="font-black text-foreground">{item.studentName}</p>
+                                {isStudentAlumni && (
+                                  <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[9px] font-black text-slate-600">Alumni</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">{item.nim || "-"}</p>
+                            </td>
+                            <td className="px-5 py-3"><p className="font-bold text-foreground">{item.taskName}</p>{item.taskDescription && <p className="text-xs text-muted-foreground">{item.taskDescription}</p>}{item.notes && <p className="text-xs text-muted-foreground">Catatan: {item.notes}</p>}</td>
+                            <td className="px-5 py-3"><Badge status={isStudentAlumni && item.status === "Ditugaskan" ? "Bebas Tugas (Alumni)" : getPicketAssignmentStatus(item)} /></td>
+                            <td className="px-5 py-3">{item.autoCompletedByWfh ? <span className="text-xs font-semibold text-indigo-700">Otomatis via WFH</span> : isStudentAlumni ? <span className="text-xs font-semibold text-slate-500">Bebas Piket</span> : item.photoUrl ? <a href={item.photoUrl} target="_blank" rel="noreferrer" className="text-xs font-black text-blue-600 hover:underline">Lihat Foto</a> : <span className="text-xs text-muted-foreground">Belum submit</span>}</td>
+                            <td className="px-5 py-3">
+                              <div className="flex flex-wrap gap-2">
+                                <button onClick={() => startEditSchedule(item)} className="h-8 rounded-[8px] border border-border bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50">Edit</button>
+                                <button onClick={() => removeDailySchedule(item)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-red-500 px-3 text-xs font-black text-white disabled:opacity-60"><Trash2 size={13} /> Hapus</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

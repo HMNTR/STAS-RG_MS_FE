@@ -88,9 +88,9 @@ export default function Piket() {
       ]);
 
       if (todayRes.status === "fulfilled") {
-        setTodayAssignment(mapPicketTodayAssignment(todayRes.value));
-        setFixedDay(getPicketStudentDayFromTodayResponse(todayRes.value));
-        setTodayHoliday(isPicketHolidayResponse(todayRes.value) ? getPicketHolidayFromTodayResponse(todayRes.value) : null);
+        setTodayAssignment(isAlumni ? null : mapPicketTodayAssignment(todayRes.value));
+        setFixedDay(isAlumni ? null : getPicketStudentDayFromTodayResponse(todayRes.value));
+        setTodayHoliday(isAlumni ? null : (isPicketHolidayResponse(todayRes.value) ? getPicketHolidayFromTodayResponse(todayRes.value) : null));
       }
 
       if (historyRes.status === "fulfilled") {

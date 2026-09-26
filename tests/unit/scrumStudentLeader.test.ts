@@ -62,30 +62,85 @@ test("isMahasiswaKetuaRiset correctly identifies student research leaders", () =
   assert.equal(isMahasiswaKetuaRiset(undefined), false, "Should return false for undefined user");
 });
 
-test("SharedBoardView.tsx enforces read-only board metadata and milestone for students", () => {
-  const content = fs.readFileSync(sharedBoardViewPath, "utf-8");
+test("SharedBoardView.tsx and ScrumBoard.tsx allow research edit access only to ketua riset, dosen, and admin", () => {
+  const sharedContent = fs.readFileSync(sharedBoardViewPath, "utf-8");
+  const scrumContent = fs.readFileSync(scrumBoardPath, "utf-8");
 
-  // canManageMetadata must be restricted to operator and dosen
+  // canManageMetadata must be granted to operator, dosen, or isLeader (ketua riset)
   assert.ok(
-    content.includes('canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen"'),
-    "SharedBoardView.tsx must define canManageMetadata restricted to operator or dosen"
+    sharedContent.includes('canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen" || isLeader'),
+    "SharedBoardView.tsx must define canManageMetadata allowing operator, dosen, or isLeader"
+  );
+  assert.ok(
+    scrumContent.includes('canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen" || isLeader'),
+    "ScrumBoard.tsx must define canManageMetadata allowing operator, dosen, or isLeader"
   );
 
-  // Edit Board button must be guarded by canManageMetadata
+  // Edit Board buttons must be guarded by canManageMetadata
   assert.ok(
-    content.includes("{canManageMetadata && ("),
+    sharedContent.includes("{canManageMetadata && ("),
     "SharedBoardView.tsx must guard metadata edit buttons with canManageMetadata"
   );
-
-  // MilestoneBanner editable prop must be bound to canManageMetadata
   assert.ok(
-    content.includes("editable={canManageMetadata}"),
+    scrumContent.includes("{canManageMetadata && ("),
+    "ScrumBoard.tsx must guard metadata edit buttons with canManageMetadata"
+  );
+
+  // Milestone banner editable prop must be bound to canManageMetadata
+  assert.ok(
+    sharedContent.includes("editable={canManageMetadata}"),
     "MilestoneBanner in SharedBoardView.tsx must use canManageMetadata for editable prop"
+  );
+  assert.ok(
+    scrumContent.includes("editable={canManageMetadata}"),
+    "MilestoneBanner in ScrumBoard.tsx must use canManageMetadata for editable prop"
+  );
+
+  // External attachment link edit must be guarded by canManageMetadata
+  assert.ok(
+    scrumContent.includes("setIsEditingAttachment"),
+    "ScrumBoard.tsx must support toggling attachment editing"
+  );
+  assert.ok(
+    scrumContent.includes("handleSaveAttachmentLink"),
+    "ScrumBoard.tsx must implement handleSaveAttachmentLink"
+  );
+
+  // Edit Board modal must exist in ScrumBoard.tsx
+  assert.ok(
+    scrumContent.includes("isEditBoardOpen && canManageMetadata"),
+    "ScrumBoard.tsx must guard EditBoard modal with isEditBoardOpen and canManageMetadata"
+  );
+  assert.ok(
+    scrumContent.includes("handleSaveBoardHeader"),
+    "ScrumBoard.tsx must implement handleSaveBoardHeader"
+  );
+
+  // Kelola Milestone modal must exist in ScrumBoard.tsx
+  assert.ok(
+    scrumContent.includes("isMilestoneOpen && canManageMetadata"),
+    "ScrumBoard.tsx must guard Milestone modal with isMilestoneOpen and canManageMetadata"
+  );
+  assert.ok(
+    scrumContent.includes("handleAddMilestone"),
+    "ScrumBoard.tsx must implement handleAddMilestone"
+  );
+  assert.ok(
+    scrumContent.includes("handleRenameMilestone"),
+    "ScrumBoard.tsx must implement handleRenameMilestone"
+  );
+  assert.ok(
+    scrumContent.includes("handleRemoveMilestone"),
+    "ScrumBoard.tsx must implement handleRemoveMilestone"
+  );
+  assert.ok(
+    scrumContent.includes("handleToggleMilestone"),
+    "ScrumBoard.tsx must implement handleToggleMilestone"
   );
 
   // normalizeBoardPermissions must support isLeaderMemberFallback
   assert.ok(
-    content.includes("isLeaderMemberFallback"),
+    sharedContent.includes("isLeaderMemberFallback"),
     "normalizeBoardPermissions must support isLeaderMemberFallback parameter"
   );
 });
@@ -113,7 +168,7 @@ test("ScrumBoard.tsx renders active sprint section, read-only metadata, lampiran
     "ScrumBoard.tsx must render 'Tampilkan: Semua Tugas (Termasuk Backlog)' toggle button"
   );
 
-  // Must render read-only metadata banner
+  // Must render read-only metadata banner for ordinary students
   assert.ok(
     content.includes("Milestone Riset (Read-Only)"),
     "ScrumBoard.tsx must render read-only milestone banner"
@@ -173,5 +228,43 @@ test("ScrumBoard.tsx renders active sprint section, read-only metadata, lampiran
   assert.ok(
     content.includes('rel="noopener noreferrer"'),
     "ScrumBoard.tsx must use secure rel='noopener noreferrer' on external links"
+  );
+});
+
+test("ScrumBoard.tsx supports Kanban Drag & Drop, Task Comments, and Git branch helper", () => {
+  const content = fs.readFileSync(scrumBoardPath, "utf-8");
+
+  // Drag and Drop
+  assert.ok(
+    content.includes("handleTaskDragStart"),
+    "ScrumBoard.tsx must implement handleTaskDragStart"
+  );
+  assert.ok(
+    content.includes("handleColumnDragOver"),
+    "ScrumBoard.tsx must implement handleColumnDragOver"
+  );
+  assert.ok(
+    content.includes("handleColumnDrop"),
+    "ScrumBoard.tsx must implement handleColumnDrop"
+  );
+
+  // Task Comments
+  assert.ok(
+    content.includes("handleSendComment"),
+    "ScrumBoard.tsx must implement handleSendComment"
+  );
+  assert.ok(
+    content.includes("loadComments"),
+    "ScrumBoard.tsx must implement loadComments"
+  );
+
+  // Git Branch Helper
+  assert.ok(
+    content.includes("generateBranchTemplate"),
+    "ScrumBoard.tsx must use generateBranchTemplate"
+  );
+  assert.ok(
+    content.includes("Copy Branch Template"),
+    "ScrumBoard.tsx must include Copy Branch Template action"
   );
 });
