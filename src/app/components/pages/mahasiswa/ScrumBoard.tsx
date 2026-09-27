@@ -29,9 +29,18 @@ import {
   Trash2,
   Send,
   Copy,
-  Check
+  Check,
+  Pin,
+  Download
 } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost, getStoredUser, resolveApiAssetUrl } from "../../../lib/api";
+import {
+  getPinnedAttachments,
+  savePinnedAttachment,
+  removePinnedAttachment,
+  subscribePinnedAttachments,
+  PinnedAttachmentMeta
+} from "../../../lib/attachmentPins";
 import { formatDateReadable } from "../../../lib/date";
 import {
   ProjectDivision,
@@ -348,6 +357,83 @@ export default function ScrumBoard() {
   // Access rights for managing research metadata: Ketua Riset, Dosen, and Admin (Operator)
   const canManageMetadata = currentUser?.role === "operator" || currentUser?.role === "dosen" || isLeader;
 
+  // Pinned attachments & caption state
+  const [pinnedAttachmentsMap, setPinnedAttachmentsMap] = useState<Record<string, PinnedAttachmentMeta>>({});
+  const [pinningTarget, setPinningTarget] = useState<{
+    attachment: any;
+    taskId?: string;
+    taskTitle?: string;
+  } | null>(null);
+  const [pinCaptionDraft, setPinCaptionDraft] = useState("");
+
+  // Synchronize pinned attachments
+  useEffect(() => {
+    const projId = selectedProjectFilter !== "all" ? selectedProjectFilter : (currentProject?.id || null);
+    setPinnedAttachmentsMap(getPinnedAttachments(projId));
+    const unsubscribe = subscribePinnedAttachments(projId, (pinned) => {
+      setPinnedAttachmentsMap(pinned);
+    });
+    return unsubscribe;
+  }, [selectedProjectFilter, currentProject?.id]);
+
+  const handleOpenPinModal = (attachment: any, taskId?: string, taskTitle?: string) => {
+    const existing = pinnedAttachmentsMap[attachment.id];
+    setPinningTarget({
+      attachment,
+      taskId,
+      taskTitle: taskTitle || (taskId ? `Tugas ${taskId}` : undefined)
+    });
+    setPinCaptionDraft(existing?.caption || "");
+  };
+
+  const handleSavePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinningTarget) return;
+    const projId = selectedProjectFilter !== "all" ? selectedProjectFilter : (currentProject?.id || null);
+    const { attachment, taskId, taskTitle } = pinningTarget;
+    const caption = pinCaptionDraft.trim();
+    savePinnedAttachment(projId, {
+      attachmentId: String(attachment.id),
+      taskId,
+      taskTitle,
+      fileName: attachment.name || attachment.fileName || attachment.file_name || "Lampiran",
+      fileUrl: attachment.url || attachment.fileUrl || attachment.file_url,
+      sizeLabel: attachment.sizeLabel || (attachment.file_size ? `${Math.round(attachment.file_size / 1024)} KB` : undefined),
+      caption,
+      pinnedBy: currentUser?.name || (isLeader ? "Ketua Riset" : "Admin / Dosen"),
+      pinnedAt: new Date().toISOString()
+    });
+
+    if (projId && taskId) {
+      try {
+        await apiPatch(`/research/${projId}/board/tasks/${taskId}/attachments/${attachment.id}/pin`, {
+          isPinned: true,
+          caption
+        });
+      } catch (err) {
+        console.warn("Gagal menyimpan pin ke server:", err);
+      }
+    }
+
+    setPinningTarget(null);
+    setPinCaptionDraft("");
+  };
+
+  const handleUnpinAttachment = async (attachmentId: string) => {
+    const projId = selectedProjectFilter !== "all" ? selectedProjectFilter : (currentProject?.id || null);
+    const existing = pinnedAttachmentsMap[attachmentId];
+    removePinnedAttachment(projId, attachmentId);
+    if (projId && existing?.taskId) {
+      try {
+        await apiPatch(`/research/${projId}/board/tasks/${existing.taskId}/attachments/${attachmentId}/pin`, {
+          isPinned: false
+        });
+      } catch (err) {
+        console.warn("Gagal melepas pin di server:", err);
+      }
+    }
+  };
+
   // Load project-specific details (sprints, members, milestones, repositories, divisions)
   useEffect(() => {
     if (!selectedProjectFilter || selectedProjectFilter === "all") {
@@ -476,6 +562,31 @@ export default function ScrumBoard() {
               };
             });
 
+            // Sync server pinned attachments
+            const serverPinned: Record<string, PinnedAttachmentMeta> = {};
+            mapped.forEach((t) => {
+              (t.attachments || []).forEach((at: any) => {
+                if (at.is_pinned || at.isPinned) {
+                  const meta: PinnedAttachmentMeta = {
+                    attachmentId: String(at.id),
+                    taskId: String(t.id),
+                    taskTitle: t.title,
+                    fileName: at.file_name || at.fileName || "Lampiran",
+                    fileUrl: at.file_url || at.fileUrl,
+                    sizeLabel: at.file_size ? `${Math.round(at.file_size / 1024)} KB` : undefined,
+                    caption: at.pin_caption || at.pinCaption || "",
+                    pinnedBy: at.pinned_by || at.pinnedBy || undefined,
+                    pinnedAt: at.pinned_at || at.pinnedAt || new Date().toISOString()
+                  };
+                  serverPinned[String(at.id)] = meta;
+                  savePinnedAttachment(selectedProjectFilter, meta);
+                }
+              });
+            });
+            if (Object.keys(serverPinned).length > 0) {
+              setPinnedAttachmentsMap((prev) => ({ ...serverPinned, ...prev }));
+            }
+
             setTasks(mapped);
             setLoading(false);
             return;
@@ -592,6 +703,15 @@ export default function ScrumBoard() {
         (t.status === "DOING" || t.status === "REVIEW")
     );
   }, [tasks, activeSprint, selectedProjectFilter]);
+
+  // Group tasks that have attachments for the current project
+  const tasksWithAttachments = useMemo(() => {
+    let list = tasks;
+    if (selectedProjectFilter !== "all") {
+      list = list.filter((t) => t.projectId === selectedProjectFilter);
+    }
+    return list.filter((t) => Array.isArray(t.attachments) && t.attachments.length > 0);
+  }, [tasks, selectedProjectFilter]);
 
   // Columns
   const columns: Array<{
@@ -1302,6 +1422,226 @@ export default function ScrumBoard() {
                 <p className="text-xs text-slate-400 italic">Belum ada link lampiran eksternal dari pembimbing.</p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ── Lampiran Tugas Section ── */}
+        {selectedProjectFilter !== "all" && (
+          <div className="bg-white rounded-[20px] border border-border p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Paperclip size={18} className="text-primary" />
+                <h3 className="text-sm font-black text-foreground">Lampiran Tugas</h3>
+              </div>
+              <span className="text-xs text-muted-foreground font-semibold">
+                {tasksWithAttachments.reduce((sum, t) => sum + (t.attachments?.length || 0), 0)} lampiran
+              </span>
+            </div>
+
+            {/* Pinned Attachments Highlight Banner */}
+            {Object.values(pinnedAttachmentsMap).length > 0 && (
+              <div className="rounded-[16px] border border-amber-200/90 bg-gradient-to-r from-amber-50/90 via-orange-50/40 to-amber-50/60 p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500 text-white shadow-sm">
+                      <Pin size={15} className="rotate-45" />
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-black text-amber-950">Lampiran Penting Disematkan</h4>
+                      <p className="text-[11px] font-medium text-amber-800/80">
+                        {Object.values(pinnedAttachmentsMap).length} lampiran disematkan dengan instruksi khusus dari pembimbing / ketua tim
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {Object.values(pinnedAttachmentsMap).map((pinned) => {
+                    const resolvedUrl = pinned.fileUrl ? (resolveApiAssetUrl(pinned.fileUrl) || pinned.fileUrl) : undefined;
+                    return (
+                      <div
+                        key={pinned.attachmentId}
+                        className="rounded-xl border border-amber-200 bg-white p-3.5 shadow-sm flex flex-col justify-between gap-2.5"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-bold shrink-0">
+                                <Pin size={11} className="rotate-45" /> Pinned
+                              </span>
+                              <p className="truncate text-xs font-bold text-foreground" title={pinned.fileName}>
+                                {pinned.fileName}
+                              </p>
+                            </div>
+                            {canManageMetadata && (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleOpenPinModal(
+                                      { id: pinned.attachmentId, name: pinned.fileName, url: pinned.fileUrl, sizeLabel: pinned.sizeLabel },
+                                      pinned.taskId,
+                                      pinned.taskTitle
+                                    )
+                                  }
+                                  className="px-2 py-0.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-[11px] font-bold"
+                                  title="Edit Catatan"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnpinAttachment(pinned.attachmentId)}
+                                  className="px-2 py-0.5 rounded text-red-500 hover:text-red-700 hover:bg-red-50 text-[11px] font-bold"
+                                  title="Lepas Sematan"
+                                >
+                                  Lepas
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {pinned.taskTitle && (
+                            <p className="text-[11px] text-muted-foreground font-medium">
+                              Tugas: <span className="text-foreground font-semibold">{pinned.taskTitle}</span>
+                            </p>
+                          )}
+
+                          {pinned.caption && (
+                            <div className="rounded-lg bg-amber-50/90 border border-amber-200/90 px-2.5 py-1.5 text-xs text-amber-950 font-medium">
+                              <span className="font-bold text-amber-900">Catatan:</span> {pinned.caption}
+                            </div>
+                          )}
+
+                          {(pinned.pinnedBy || pinned.pinnedAt) && (
+                            <p className="text-[10px] text-muted-foreground">
+                              {pinned.pinnedBy ? `Disematkan oleh ${pinned.pinnedBy}` : "Disematkan"}
+                              {pinned.pinnedAt ? ` • ${new Date(pinned.pinnedAt).toLocaleDateString("id-ID")}` : ""}
+                            </p>
+                          )}
+                        </div>
+
+                        {resolvedUrl && (
+                          <div className="pt-1 flex justify-end">
+                            <a
+                              href={resolvedUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download={pinned.fileName || undefined}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 text-xs font-bold transition-colors shadow-sm"
+                            >
+                              <Download size={12} /> Buka / Unduh
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {tasksWithAttachments.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-xs text-muted-foreground">
+                Belum ada lampiran tugas. Lampiran akan muncul di sini setelah tugas atau sub-tugas diberi bukti pengerjaan.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {tasksWithAttachments.map((task) => (
+                  <div key={task.id} className="rounded-xl border border-border/80 bg-slate-50/60 p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-sm font-black text-foreground">{task.title}</p>
+                        <p className="text-[11px] font-medium text-muted-foreground">{task.attachments.length} lampiran</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedTask(task)}
+                        className="text-xs font-bold text-[#0AB600] hover:underline"
+                      >
+                        Buka Tugas
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      {task.attachments.map((attachment) => {
+                        const fileUrl = resolveApiAssetUrl(attachment.file_url || attachment.fileUrl) || attachment.file_url || attachment.fileUrl || "";
+                        const fileName = attachment.file_name || attachment.fileName || "Lampiran";
+                        const isPinned = Boolean(pinnedAttachmentsMap[attachment.id]);
+                        const pinnedInfo = pinnedAttachmentsMap[attachment.id];
+                        return (
+                          <div
+                            key={attachment.id}
+                            className={`flex flex-col gap-2 rounded-xl border p-3 bg-white ${
+                              isPinned ? "border-amber-300 ring-1 ring-amber-200" : "border-border/70"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                                  isPinned ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-600"
+                                }`}
+                              >
+                                {isPinned ? <Pin size={16} className="rotate-45" /> : <FileText size={16} />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="truncate text-xs font-bold text-foreground">{fileName}</p>
+                                  {isPinned && (
+                                    <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 shrink-0">
+                                      <Pin size={10} className="rotate-45" /> Disematkan
+                                    </span>
+                                  )}
+                                </div>
+                                {attachment.file_size ? (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {Math.round(attachment.file_size / 1024)} KB
+                                  </p>
+                                ) : null}
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {canManageMetadata && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenPinModal(attachment, task.id, task.title)}
+                                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-bold transition-colors shadow-sm ${
+                                      isPinned
+                                        ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                        : "border-border bg-white text-slate-600 hover:bg-slate-100"
+                                    }`}
+                                    title={isPinned ? "Edit catatan pin" : "Sematkan lampiran ini"}
+                                  >
+                                    <Pin size={12} className={isPinned ? "rotate-45 text-amber-600" : ""} />
+                                    <span>{isPinned ? "Catatan" : "Pin"}</span>
+                                  </button>
+                                )}
+                                {fileUrl && (
+                                  <a
+                                    href={fileUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download={fileName || undefined}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-white border border-border px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors shadow-sm"
+                                  >
+                                    <Download size={12} /> Buka
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+
+                            {isPinned && pinnedInfo?.caption && (
+                              <div className="ml-12 rounded-lg bg-amber-50 border border-amber-200/80 px-2.5 py-1.5 text-xs text-amber-950 font-medium">
+                                <span className="font-bold">Catatan:</span> {pinnedInfo.caption}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -2133,21 +2473,67 @@ export default function ScrumBoard() {
                       ) : (
                         selectedTask.attachments.map((at) => {
                           const fileUrl = resolveApiAssetUrl(at.file_url || at.fileUrl) || at.file_url || at.fileUrl || "";
+                          const fileName = at.file_name || at.fileName || "Lampiran";
+                          const isPinned = Boolean(pinnedAttachmentsMap[at.id]);
+                          const pinnedInfo = pinnedAttachmentsMap[at.id];
                           return (
-                            <a
+                            <div
                               key={at.id}
-                              href={fileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              download={at.file_name || at.fileName || undefined}
-                              className="p-2.5 bg-slate-50 border border-border rounded-xl flex items-center justify-between hover:bg-slate-100 transition-colors group"
+                              className={`p-2.5 rounded-xl border flex flex-col gap-1.5 ${
+                                isPinned ? "bg-amber-50/50 border-amber-200" : "bg-slate-50 border-border"
+                              }`}
                             >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <Paperclip size={14} className="text-primary shrink-0" />
-                                <span className="text-xs font-bold text-foreground truncate">{at.file_name || at.fileName}</span>
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {isPinned ? (
+                                    <Pin size={14} className="text-amber-600 rotate-45 shrink-0" />
+                                  ) : (
+                                    <Paperclip size={14} className="text-primary shrink-0" />
+                                  )}
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-xs font-bold text-foreground truncate">{fileName}</span>
+                                    {isPinned && (
+                                      <span className="rounded bg-amber-100 px-1.5 py-0.2 text-[9px] font-bold text-amber-800 shrink-0">
+                                        Disematkan
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {canManageMetadata && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenPinModal(at, selectedTask.id, selectedTask.title)}
+                                      className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-bold transition-colors shadow-sm ${
+                                        isPinned
+                                          ? "border-amber-200 bg-amber-100/60 text-amber-800 hover:bg-amber-200/60"
+                                          : "border-border bg-white text-slate-600 hover:bg-slate-100"
+                                      }`}
+                                      title={isPinned ? "Edit Catatan Pin" : "Sematkan Lampiran"}
+                                    >
+                                      <Pin size={10} className={isPinned ? "rotate-45" : ""} />
+                                      <span>{isPinned ? "Catatan" : "Pin"}</span>
+                                    </button>
+                                  )}
+                                  {fileUrl && (
+                                    <a
+                                      href={fileUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download={at.file_name || at.fileName || undefined}
+                                      className="inline-flex items-center gap-1 rounded-lg bg-white border border-border px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 transition-colors shadow-sm shrink-0"
+                                    >
+                                      <Download size={11} /> Buka
+                                    </a>
+                                  )}
+                                </div>
                               </div>
-                              <ExternalLink size={14} className="text-muted-foreground group-hover:text-foreground shrink-0" />
-                            </a>
+                              {isPinned && pinnedInfo?.caption && (
+                                <div className="ml-5 rounded-lg bg-amber-100/60 border border-amber-200/70 px-2 py-1 text-[11px] text-amber-950 font-medium">
+                                  <span className="font-semibold">Catatan:</span> {pinnedInfo.caption}
+                                </div>
+                              )}
+                            </div>
                           );
                         })
                       )}
@@ -2648,6 +3034,89 @@ export default function ScrumBoard() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* 📌 Pin Attachment with Caption Modal */}
+        {pinningTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-[20px] w-full max-w-md shadow-2xl border border-border overflow-hidden">
+              <div className="p-5 border-b border-border/70 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500 text-white shadow-sm shrink-0">
+                    <Pin size={16} className="rotate-45" />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-black text-foreground">Sematkan Lampiran Penting</h3>
+                    <p className="text-xs text-muted-foreground truncate max-w-[260px]">
+                      {pinningTarget.attachment.name || pinningTarget.attachment.fileName || "Lampiran"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPinningTarget(null)}
+                  className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 rounded-lg hover:bg-slate-100"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleSavePin} className="p-5 space-y-4">
+                {pinningTarget.taskTitle && (
+                  <div className="text-xs text-muted-foreground bg-slate-50 border border-slate-200/80 rounded-lg p-2.5">
+                    Tugas: <span className="font-bold text-foreground">{pinningTarget.taskTitle}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-foreground">
+                    Catatan / Keterangan Penting (Caption)
+                  </label>
+                  <textarea
+                    value={pinCaptionDraft}
+                    onChange={(e) => setPinCaptionDraft(e.target.value)}
+                    placeholder="Contoh: Dokumen acuan revisi bab 3 yang wajib dibaca oleh semua tim teknis..."
+                    rows={3}
+                    className="w-full rounded-xl border border-border px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Catatan ini akan tampil di banner lampiran utama dan detail tugas agar seluruh anggota tim dapat membaca instruksi ini.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  {pinnedAttachmentsMap[pinningTarget.attachment.id] ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleUnpinAttachment(pinningTarget.attachment.id);
+                        setPinningTarget(null);
+                      }}
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
+                    >
+                      Lepas Sematan
+                    </button>
+                  ) : <div />}
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPinningTarget(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-white border border-border hover:bg-slate-50 transition-colors"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 shadow-sm transition-colors"
+                    >
+                      Simpan Sematan
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
           </div>
         )}
