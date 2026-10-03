@@ -194,7 +194,7 @@ export function normalizeSprintSummary(data: any): NormalizedSprintSummary {
     divisionId: task.divisionId ?? task.division_id ?? null,
     divisionName: String(task.divisionName ?? task.division_name ?? "Belum Ada Divisi"),
     storyPoints: Number(task.storyPoints ?? task.story_points ?? 0),
-    outcome: task.outcome || null,
+    outcome: (task.outcome && task.outcome !== "pending") ? task.outcome : null,
     targetSprintId: task.targetSprintId ?? task.target_sprint_id ?? null,
   }));
 

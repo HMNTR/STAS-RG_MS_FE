@@ -22,12 +22,13 @@ import {
   GitBranch,
   GitCommit,
   GitPullRequest,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { OperatorLayout } from "../../templates/OperatorLayout";
 import { DosenLayout } from "../../templates/DosenLayout";
-import { apiGet, apiPut, apiPost } from "../../../lib/api";
+import { apiGet, apiPut, apiPost, apiDelete } from "../../../lib/api";
 import {
   NormalizedSprintSummary,
   normalizeSprintSummary,
@@ -80,7 +81,7 @@ interface ProjectMember {
   initials?: string;
 }
 
-type TabKey = "overview" | "hasil" | "rapat" | "evaluasi" | "carry_over" | "development";
+type TabKey = "overview" | "hasil" | "evaluasi" | "carry_over" | "development";
 
 export default function SprintSummary() {
   const { user: currentUser } = useAuth();
@@ -311,8 +312,9 @@ export default function SprintSummary() {
       // Populate unfinished outcome drafts
       const initialDrafts: Record<string, any> = {};
       normalized.unfinishedWork.forEach(task => {
+        const effectiveOutcome = (task.outcome && task.outcome !== "pending") ? task.outcome : "";
         initialDrafts[task.taskId] = {
-          outcome: task.outcome || "",
+          outcome: effectiveOutcome,
           targetSprintId: task.targetSprintId || (normalized.planningTargetSprints[0]?.id || "")
         };
       });
@@ -495,17 +497,52 @@ export default function SprintSummary() {
     }
   };
 
-  const toggleAttendee = (userId: string) => {
-    setMeetingForm(prev => {
-      const exists = prev.attendeeUserIds.includes(userId);
-      return {
-        ...prev,
-        attendeeUserIds: exists
-          ? prev.attendeeUserIds.filter(id => id !== userId)
-          : [...prev.attendeeUserIds, userId]
-      };
-    });
+  const handleDeleteSprint = async () => {
+    if (!selectedProjectId || !selectedSprintId) return;
+    const sprintName = currentSprint?.name || "Sprint";
+    const statusUpper = currentSprint?.status ? currentSprint.status.toUpperCase() : "";
+    const confirmed = window.confirm(
+      `Hapus ${sprintName} (${statusUpper})?\n\nSemua tugas di dalamnya akan dikembalikan ke Product Backlog.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setSummaryLoading(true);
+      setError("");
+      setSuccessMessage("");
+      await apiDelete(`/research/${selectedProjectId}/sprints/${selectedSprintId}?force=true`);
+      setSuccessMessage(`Sprint "${sprintName}" berhasil dihapus.`);
+
+      // Reload sprints list
+      const sprintsRes = await apiGet<any[]>(`/research/${selectedProjectId}/sprints`);
+      const sprintList: SprintItem[] = (sprintsRes || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        goal: s.goal,
+        status: s.status,
+        startDate: s.startDate || s.start_date,
+        endDate: s.endDate || s.end_date,
+        closedAt: s.closedAt || s.closed_at
+      }));
+      setSprints(sprintList);
+
+      const nextSprint = selectDefaultSprint(sprintList);
+      if (nextSprint) {
+        setSelectedSprintId(nextSprint.id);
+      } else {
+        setSelectedSprintId("");
+        setSummaryData(null);
+      }
+    } catch (err: any) {
+      setError(formatScrumError(err));
+    } finally {
+      setSummaryLoading(false);
+    }
   };
+
+  const evaluatableMembers = useMemo(() => {
+    return (summaryData?.requiredEvaluations || []).filter((m) => String(m.id) !== String(currentUser?.id));
+  }, [summaryData?.requiredEvaluations, currentUser?.id]);
 
   return (
     <LayoutComponent>
@@ -616,9 +653,19 @@ export default function SprintSummary() {
               )}
             </div>
 
-            {/* Quick action for Review Sprint finalization */}
-            {isReviewSprint && summaryData && (
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              {/* Delete Sprint button */}
+              <button
+                onClick={handleDeleteSprint}
+                className="h-11 px-4 rounded-xl text-xs font-black transition-all flex items-center gap-2 border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 cursor-pointer shadow-sm"
+                title="Hapus Sprint ini (Semua tugas di dalamnya akan dikembalikan ke Product Backlog)"
+              >
+                <Trash2 size={15} />
+                <span>Hapus Sprint</span>
+              </button>
+
+              {/* Quick action for Review Sprint finalization */}
+              {isReviewSprint && summaryData && (
                 <button
                   onClick={handleFinalizeSprint}
                   disabled={!summaryData.canFinalize || finalizing}
@@ -632,8 +679,8 @@ export default function SprintSummary() {
                   <CheckCircle2 size={16} />
                   <span>{finalizing ? "Memfinalisasi..." : "Finalize Sprint"}</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
@@ -710,7 +757,6 @@ export default function SprintSummary() {
               {[
                 { key: "overview", label: "Overview", icon: Layers },
                 { key: "hasil", label: "Hasil & Ringkasan", icon: FileText },
-                { key: "rapat", label: "Rapat Review", icon: Users },
                 { key: "evaluasi", label: "Evaluasi Anggota", icon: Award },
                 { key: "carry_over", label: "Carry Over & Kesiapan", icon: ArrowRight },
                 { key: "development", label: "Development Activity", icon: GitBranch },
@@ -1031,169 +1077,7 @@ export default function SprintSummary() {
               </div>
             )}
 
-            {/* TAB 3: RAPAT REVIEW (MEETING) */}
-            {activeTab === "rapat" && summaryData && (
-              <div className="bg-white p-6 rounded-[24px] border border-border shadow-sm flex flex-col gap-5 max-w-4xl mx-auto w-full">
-                <div className="flex items-center justify-between pb-3 border-b border-border/60">
-                  <div>
-                    <h3 className="text-sm font-black text-foreground">Notula Rapat Sprint Review</h3>
-                    <p className="text-xs text-muted-foreground">Catat kehadiran peserta, agenda, dan keputusan bersama.</p>
-                  </div>
-                  {isClosedSprint && (
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase bg-slate-100 px-2.5 py-0.5 rounded">
-                      Read-only
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Tanggal Rapat</label>
-                    <input
-                      type="date"
-                      value={meetingForm.meetingDate}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, meetingDate: e.target.value })}
-                      disabled={isClosedSprint}
-                      className="w-full h-10 px-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Waktu Mulai</label>
-                    <input
-                      type="time"
-                      value={meetingForm.startTime}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, startTime: e.target.value })}
-                      disabled={isClosedSprint}
-                      className="w-full h-10 px-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Lokasi Rapat</label>
-                    <input
-                      type="text"
-                      value={meetingForm.location}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, location: e.target.value })}
-                      disabled={isClosedSprint}
-                      placeholder="e.g. Lab STAS / Ruang Riset 302"
-                      className="w-full h-10 px-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Link Pertemuan Online (Opsional)</label>
-                    <input
-                      type="text"
-                      value={meetingForm.meetingLink}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, meetingLink: e.target.value })}
-                      disabled={isClosedSprint}
-                      placeholder="https://meet.google.com/..."
-                      className="w-full h-10 px-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="font-bold text-foreground block mb-1">Pemimpin Rapat (Chair)</label>
-                    <select
-                      value={meetingForm.chairUserId}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, chairUserId: e.target.value })}
-                      disabled={isClosedSprint}
-                      className="w-full h-10 px-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100 cursor-pointer"
-                    >
-                      <option value="">Pilih Pemimpin Rapat...</option>
-                      {projectMembers.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({m.role || "Anggota"})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Attendees Checklist */}
-                <div className="text-xs">
-                  <label className="font-bold text-foreground block mb-2">Daftar Kehadiran Anggota (Attendees)</label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 p-3 bg-slate-50 border border-border rounded-xl max-h-52 overflow-y-auto">
-                    {projectMembers.map((m) => {
-                      const isSelected = meetingForm.attendeeUserIds.includes(m.id);
-                      return (
-                        <label
-                          key={m.id}
-                          className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer select-none transition-colors ${
-                            isSelected
-                              ? "bg-purple-50 border-purple-200 text-purple-950 font-bold"
-                              : "bg-white border-slate-200 text-foreground"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleAttendee(m.id)}
-                            disabled={isClosedSprint}
-                            className="rounded border-slate-300 text-primary focus:ring-primary/20"
-                          />
-                          <span className="truncate">{m.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3 text-xs">
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Agenda Rapat</label>
-                    <textarea
-                      rows={2}
-                      value={meetingForm.agenda}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, agenda: e.target.value })}
-                      disabled={isClosedSprint}
-                      placeholder="Agenda pembahasan review..."
-                      className="w-full p-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Catatan Rapat</label>
-                    <textarea
-                      rows={3}
-                      value={meetingForm.notes}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, notes: e.target.value })}
-                      disabled={isClosedSprint}
-                      placeholder="Catatan diskusi jalannya rapat review..."
-                      className="w-full p-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-foreground block mb-1">Keputusan Rapat</label>
-                    <textarea
-                      rows={2}
-                      value={meetingForm.decisions}
-                      onChange={(e) => setMeetingForm({ ...meetingForm, decisions: e.target.value })}
-                      disabled={isClosedSprint}
-                      placeholder="Kesimpulan dan keputusan aksi lanjut..."
-                      className="w-full p-3 bg-slate-50 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-
-                {isReviewSprint && (
-                  <div className="flex justify-end pt-3 border-t border-border/60">
-                    <button
-                      onClick={handleSaveMeeting}
-                      disabled={savingMeeting}
-                      className="h-10 px-5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-xl transition-colors flex items-center gap-2 shadow-sm cursor-pointer"
-                    >
-                      <Save size={14} />
-                      <span>{savingMeeting ? "Menyimpan..." : "Simpan Rapat Review"}</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 4: EVALUASI ANGGOTA (MEMBER EVALUATION) */}
+            {/* TAB 3: EVALUASI ANGGOTA (MEMBER EVALUATION) */}
             {activeTab === "evaluasi" && summaryData && (
               <div className="flex flex-col gap-6">
                 <div className="flex items-center justify-between bg-white p-4 rounded-[20px] border border-border shadow-sm">
@@ -1204,13 +1088,13 @@ export default function SprintSummary() {
                     </p>
                   </div>
                   <span className="px-3 py-1 rounded-full text-xs font-black bg-purple-100 text-purple-700">
-                    {summaryData.evaluations.length} / {summaryData.requiredEvaluations.length} Dievaluasi
+                    {summaryData.evaluations.length} / {evaluatableMembers.length} Dievaluasi
                   </span>
                 </div>
 
                 {summaryData.requiredEvaluations.length === 0 ? (
                   <div className="p-8 text-center bg-white border border-dashed border-border rounded-[24px] text-xs text-muted-foreground">
-                    Tidak ada anggota yang perlu dievaluasi pada Sprint ini.
+                    Tidak ada anggota yang ditugaskan pada tugas di Sprint ini.
                   </div>
                 ) : (
                   <div className="flex flex-col gap-5">
@@ -1443,15 +1327,17 @@ export default function SprintSummary() {
                                   {/* Outcome Choice */}
                                   <select
                                     value={draft.outcome}
-                                    onChange={(e) =>
+                                    onChange={(e) => {
+                                      const nextOutcome = e.target.value;
                                       setOutcomeDrafts({
                                         ...outcomeDrafts,
                                         [t.taskId]: {
                                           ...draft,
-                                          outcome: e.target.value
+                                          outcome: nextOutcome,
+                                          targetSprintId: nextOutcome === "carry_over" ? (draft.targetSprintId || summaryData.planningTargetSprints[0]?.id || "") : draft.targetSprintId
                                         }
-                                      })
-                                    }
+                                      });
+                                    }}
                                     className="h-9 px-3 text-xs font-bold bg-white border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none cursor-pointer"
                                   >
                                     <option value="">Pilih Keputusan...</option>
@@ -1475,9 +1361,7 @@ export default function SprintSummary() {
                                       }
                                       className="h-9 px-3 text-xs font-bold bg-white border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:outline-none cursor-pointer min-w-[180px]"
                                     >
-                                      {summaryData.planningTargetSprints.length === 0 && (
-                                        <option value="">Tidak ada Sprint Planning</option>
-                                      )}
+                                      <option value="">Pilih Target Sprint Planning...</option>
                                       {summaryData.planningTargetSprints.map((s) => (
                                         <option key={s.id} value={s.id}>
                                           Target: {s.name}
@@ -1532,33 +1416,25 @@ export default function SprintSummary() {
                         )}
                       </div>
 
-                      {/* 2. Rapat */}
+                      {/* 2. Evaluasi Anggota */}
                       <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                        <span className="font-bold text-foreground">Rapat Review</span>
-                        {summaryData.meeting.meetingDate && (summaryData.meeting.notes.trim() || summaryData.meeting.decisions.trim()) ? (
-                          <span className="text-emerald-600 font-black flex items-center gap-1">✓ Lengkap</span>
-                        ) : summaryData.meeting.meetingDate ? (
-                          <span className="text-amber-600 font-bold">Catatan belum diisi</span>
+                        <span className="font-bold text-foreground">Evaluasi Anggota</span>
+                        {evaluatableMembers.length === 0 ? (
+                          <span className="text-emerald-600 font-black">✓ Tidak Ada Anggota</span>
                         ) : (
-                          <span className="text-amber-600 font-bold">Wajib dilengkapi</span>
+                          <span
+                            className={`font-black ${
+                              summaryData.evaluations.length >= evaluatableMembers.length
+                                ? "text-emerald-600"
+                                : "text-amber-600"
+                            }`}
+                          >
+                            {summaryData.evaluations.length} / {evaluatableMembers.length}
+                          </span>
                         )}
                       </div>
 
-                      {/* 3. Evaluasi Anggota */}
-                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                        <span className="font-bold text-foreground">Evaluasi Anggota</span>
-                        <span
-                          className={`font-black ${
-                            summaryData.evaluations.length >= summaryData.requiredEvaluations.length
-                              ? "text-emerald-600"
-                              : "text-amber-600"
-                          }`}
-                        >
-                          {summaryData.evaluations.length} / {summaryData.requiredEvaluations.length}
-                        </span>
-                      </div>
-
-                      {/* 4. Keputusan Task Unfinished */}
+                      {/* 3. Keputusan Task Unfinished */}
                       <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                         <span className="font-bold text-foreground">Keputusan Task</span>
                         {summaryData.unfinishedWork.length === 0 ? (
@@ -1566,13 +1442,13 @@ export default function SprintSummary() {
                         ) : (
                           <span
                             className={`font-black ${
-                              summaryData.unfinishedWork.filter((t) => Boolean(t.outcome)).length >=
+                              summaryData.unfinishedWork.filter((t) => t.outcome && t.outcome !== "pending").length >=
                               summaryData.unfinishedWork.length
                                 ? "text-emerald-600"
                                 : "text-amber-600"
                             }`}
                           >
-                            {summaryData.unfinishedWork.filter((t) => Boolean(t.outcome)).length} /{" "}
+                            {summaryData.unfinishedWork.filter((t) => t.outcome && t.outcome !== "pending").length} /{" "}
                             {summaryData.unfinishedWork.length}
                           </span>
                         )}

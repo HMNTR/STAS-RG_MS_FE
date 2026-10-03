@@ -623,12 +623,14 @@ export default function ScrumPlanning() {
     }
   };
 
-  const handleDeleteSprint = async (sprintId: string) => {
+  const handleDeleteSprint = async (sprintId: string, sprintName?: string, sprintStatus?: string) => {
     if (!activeProject?.id) return;
-    if (!confirm("Hapus Sprint ini? Semua tugas di dalamnya akan dikembalikan ke Product Backlog.")) return;
+    const name = sprintName || "Sprint ini";
+    const statusText = sprintStatus ? ` (${sprintStatus.toUpperCase()})` : "";
+    if (!confirm(`Hapus ${name}${statusText}? Semua tugas di dalamnya akan dikembalikan ke Product Backlog.`)) return;
 
     try {
-      await apiDelete(`/research/${activeProject.id}/sprints/${sprintId}`);
+      await apiDelete(`/research/${activeProject.id}/sprints/${sprintId}?force=true`);
       await loadProjectData(activeProject.id);
     } catch (err: any) {
       alert(err?.message || "Gagal menghapus sprint.");
@@ -1215,15 +1217,13 @@ export default function ScrumPlanning() {
                             </button>
                           )}
 
-                          {isPlanning && (
-                            <button
-                              onClick={() => handleDeleteSprint(sprint.id)}
-                              className="p-1.5 hover:bg-red-50 text-muted-foreground hover:text-red-500 rounded-lg transition-colors"
-                              title="Hapus sprint"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleDeleteSprint(sprint.id, sprint.name, sprint.status)}
+                            className="p-1.5 hover:bg-red-50 text-muted-foreground hover:text-red-500 rounded-lg transition-colors"
+                            title="Hapus sprint"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </div>
 
@@ -1451,6 +1451,22 @@ export default function ScrumPlanning() {
               )}
 
               <div className="flex gap-2.5 pt-2">
+                {editingSprintId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idToDelete = editingSprintId;
+                      const nameToDelete = sprintForm.name;
+                      setIsSprintModalOpen(false);
+                      handleDeleteSprint(idToDelete, nameToDelete);
+                    }}
+                    className="h-10 px-3.5 border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+                    title="Hapus Sprint ini"
+                  >
+                    <Trash2 size={14} />
+                    <span>Hapus</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsSprintModalOpen(false)}
